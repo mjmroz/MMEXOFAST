@@ -423,13 +423,17 @@ class MMEXOFASTFitter:
         Mapping of dataset label to source flux fixing flag.
     renormalize_errors : bool
         Whether to renormalize dataset errors during the workflow.
-    no_parallax : bool
-        Whether to include parallax in the fitting workflow. Default is False (include parallax)
-    parallax_grid : bool
-        Whether to run a parallax grid search.
+    parallax_point_lens : bool or str
+        Whether to include parallax in the point lens fitting workflow. 
+        Default is True (include parallax).
+        If 'grid' a parallax grid search will be performed at the end of point lens workflow. TODO: but what is the reason for that?
+    parallax_binary_lens : bool or str
+        Whether to include parallax in the binary lens fitting workflow. 
+        Default is True (include parallax after static binary lens fit). 
+        If 'point_lens' the binary lens fitting will be incited using point lens + parallax model parameters
+        (TODO: not implemented yet, not recommended in the most cases).
     primary_location : str, optional
-        Location name to treat as primary (e.g. ``'ground'``,
-        ``'Spitzer'``).
+        Location name to treat as primary (e.g. ``'ground'``, ``'Spitzer'``).
     primary_dataset : str, optional
         Label of dataset used to identify the primary location.
     emcee_settings : dict, optional
@@ -535,8 +539,8 @@ class MMEXOFASTFitter:
         "fix_blend_flux",
         "fix_source_flux",
         "renormalize_errors",
-        "no_parallax",
-        "parallax_grid",
+        "parallax_point_lens",
+        "parallax_binary_lens",
         "primary_location",
         "primary_dataset",
         "emcee_settings",
@@ -580,8 +584,8 @@ class MMEXOFASTFitter:
         fix_blend_flux=None,  # TODO: Check whether fixed fluxes are implemented
         fix_source_flux=None,
         renormalize_errors: bool = True,  # TODO: ADD option for remove_outliers=True/False
-        no_parallax: bool = False,
-        parallax_grid: bool = False,
+        parallax_point_lens: bool or str = True,
+        parallax_binary_lens: bool or str = False,
         primary_location=None,
         primary_dataset=None,
         emcee_settings=None,
@@ -1124,7 +1128,7 @@ class MMEXOFASTFitter:
         steps: list[WorkflowStep] = []
         steps.extend(self._build_event_search_steps())
         steps.extend(self._build_static_fit_steps())
-        steps.extend(self._build_parallax_steps())
+        steps.extend(self._build_parallax_point_lens_steps())
 
         if self.renormalize_errors and include_renormalize:
             steps.extend(self._build_renormalize_steps())
@@ -1139,7 +1143,7 @@ class MMEXOFASTFitter:
         list of WorkflowStep
         """
         steps = self._build_common_point_lens_steps()
-        if self.parallax_grid:
+        if self.parallax_point_lens == "grid":
             steps.extend(self._build_parallax_grid_steps())
 
         return steps
@@ -1175,9 +1179,34 @@ class MMEXOFASTFitter:
         steps.extend(self._build_binary_fit_steps())
         if self.renormalize_errors:
             steps.extend(self._build_check_binary_renorm_steps())
-        if self.parallax_grid:
-            steps.extend(self._build_parallax_grid_steps())
+        if self.parallax_binary_lens == True:
+            steps.extend(self._build_parallax_binary_lens_steps())
 
+        return steps
+
+    def _build_parallax_binary_lens_steps(self) -> list[WorkflowStep]:
+        """
+        Build one WorkflowStep per parallax branch.
+
+        Returns
+        -------
+        list of WorkflowStep
+        """
+        if self.parallax_binary_lens is False:
+            return []
+
+        steps = []
+        for key in self._iter_parallax_point_lens_keys():
+            branch = key.parallax_branch
+            name = f"fit_parallax_{branch.value.lower()}"
+            steps.append(
+                WorkflowStep(
+                    name=name,
+                    func=lambda b=branch: self.fit_parallax(branch=b),
+                    stage="fit_binary_lens_parallax",
+                    description=f"Fit parallax model for branch {branch.value}",
+                )
+            )
         return steps
 
     def _build_event_search_steps(self) -> list[WorkflowStep]:
@@ -1247,7 +1276,7 @@ class MMEXOFASTFitter:
             )
         return steps
 
-    def _build_parallax_steps(self) -> list[WorkflowStep]:
+    def _build_parallax_point_lens_steps(self) -> list[WorkflowStep]:
         """
         Build one WorkflowStep per parallax branch.
 
@@ -1255,7 +1284,7 @@ class MMEXOFASTFitter:
         -------
         list of WorkflowStep
         """
-        if self.no_parallax:
+        if self.parallax_point_lens is False and self.parallax_binary_lens != "point_lens":
             return []
 
         steps = []
