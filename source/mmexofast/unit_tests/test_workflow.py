@@ -421,6 +421,39 @@ class TestPointLensWorkflow(unittest.TestCase):
             fit_types.SourceType.POINT,
         )
 
+    def test_binary_lens_parallax_uses_finite_source_keys(self):
+        """
+        Binary-lens parallax fits should keep using finite-source keys while
+        the point-lens finite-source branch remains enabled.
+        """
+        fitter = self._make_fitter(
+            finite_source_point_lens=True,
+            parallax_binary_lens=True,
+        )
+
+        fspl_key = fit_types.FitKey(
+            lens_type=fit_types.LensType.POINT,
+            source_type=fit_types.SourceType.FINITE,
+            parallax_branch=fit_types.ParallaxBranch.NONE,
+            lens_orb_motion=fit_types.LensOrbMotion.NONE,
+        )
+        fitter.all_fit_results.set(
+            mmexo.FitRecord(
+                model_key=fspl_key,
+                params={**STATIC_PSPL_PARAMS, "u_0": 0.2, "rho": 0.01},
+            )
+        )
+
+        with patch.object(
+            fitter, "_do_parallax_fit", return_value=None
+        ) as mock:
+            fitter.fit_parallax(branch=fit_types.ParallaxBranch.U0_PLUS)
+
+        self.assertEqual(
+            mock.call_args.kwargs["source_type"],
+            fit_types.SourceType.FINITE,
+        )
+
     # --- stop_before stage:step ---
 
     def test_stop_before_first_step_of_stage(self):
