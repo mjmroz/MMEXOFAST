@@ -430,8 +430,6 @@ class MMEXOFASTFitter:
     parallax_binary_lens : bool or str
         Whether to include parallax in the binary lens fitting workflow. 
         Default is True (include parallax after static binary lens fit). 
-        If 'point_lens' the binary lens fitting will be incited using point lens + parallax model parameters
-        (TODO: not implemented yet, not recommended in the most cases).
     primary_location : str, optional
         Location name to treat as primary (e.g. ``'ground'``, ``'Spitzer'``).
     primary_dataset : str, optional
@@ -585,7 +583,7 @@ class MMEXOFASTFitter:
         fix_source_flux=None,
         renormalize_errors: bool = True,  # TODO: ADD option for remove_outliers=True/False
         parallax_point_lens: bool or str = True,
-        parallax_binary_lens: bool or str = False,
+        parallax_binary_lens: bool  = False,
         primary_location=None,
         primary_dataset=None,
         emcee_settings=None,
@@ -1284,7 +1282,7 @@ class MMEXOFASTFitter:
         -------
         list of WorkflowStep
         """
-        if self.parallax_point_lens is False and self.parallax_binary_lens != "point_lens":
+        if self.parallax_point_lens is False:
             return []
 
         steps = []
