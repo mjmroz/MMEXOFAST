@@ -424,12 +424,12 @@ class MMEXOFASTFitter:
     renormalize_errors : bool
         Whether to renormalize dataset errors during the workflow.
     parallax_point_lens : bool or str
-        Whether to include parallax in the point lens fitting workflow. 
+        Whether to include parallax in the point lens fitting workflow.
         Default is True (include parallax).
         If 'grid' a parallax grid search will be performed at the end of point lens workflow. TODO: but what is the reason for that?
     parallax_binary_lens : bool or str
-        Whether to include parallax in the binary lens fitting workflow. 
-        Default is True (include parallax after static binary lens fit). 
+        Whether to include parallax in the binary lens fitting workflow.
+        Default is True (include parallax after static binary lens fit).
     primary_location : str, optional
         Location name to treat as primary (e.g. ``'ground'``, ``'Spitzer'``).
     primary_dataset : str, optional
@@ -583,7 +583,7 @@ class MMEXOFASTFitter:
         fix_source_flux=None,
         renormalize_errors: bool = True,  # TODO: ADD option for remove_outliers=True/False
         parallax_point_lens: bool or str = True,
-        parallax_binary_lens: bool  = False,
+        parallax_binary_lens: bool = False,
         primary_location=None,
         primary_dataset=None,
         emcee_settings=None,

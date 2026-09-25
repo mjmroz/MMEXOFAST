@@ -608,7 +608,7 @@ class TestPointLensRenormWorkflow(unittest.TestCase):
             coords=COORDS,
             fit_type="point_lens",
             renormalize_errors=True,
-            parallax_point_lens='grid'
+            parallax_point_lens="grid",
         )
         defaults.update(kwargs)
         return MMEXOFASTFitter(**defaults)
@@ -683,7 +683,7 @@ class TestBinaryLensWorkflow(unittest.TestCase):
             coords=COORDS,
             fit_type="binary_lens",
             renormalize_errors=True,
-            parallax_point_lens='grid',
+            parallax_point_lens="grid",
         )
         defaults.update(kwargs)
         return MMEXOFASTFitter(**defaults)
@@ -746,10 +746,7 @@ class TestBinaryLensWorkflow(unittest.TestCase):
         )
         fitter.fit()
 
-        expected = (
-            _STEPS_FIT_BINARY[1:]
-            + _STEPS_CHECK_BINARY_RENORM
-        )
+        expected = _STEPS_FIT_BINARY[1:] + _STEPS_CHECK_BINARY_RENORM
         actual = [(step.name, step.stage) for step in fitter.planned_steps]
         self.assertEqual(actual, expected)
 
@@ -1026,7 +1023,7 @@ class TestExecutionLoopDynamicSteps(unittest.TestCase):
             coords=OB05390_COORDS,
             fit_type="binary_lens",
             renormalize_errors=True,
-            parallax_point_lens='grid',
+            parallax_point_lens="grid",
             stop_after="check_binary_renorm:check_needs_renorm",
         )
 
@@ -1235,7 +1232,7 @@ class TestRestartFromPickleWithStopConditions(unittest.TestCase):
             coords=COORDS,
             fit_type="binary_lens",
             renormalize_errors=True,
-            parallax_point_lens='grid',
+            parallax_point_lens="grid",
         )
         defaults.update(kwargs)
         return MMEXOFASTFitter(restart_file=restart_file, **defaults)
