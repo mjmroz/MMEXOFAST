@@ -2,6 +2,7 @@ import os.path
 import unittest
 from unittest import mock
 
+import MulensModel
 import numpy as np
 from astropy.time import Time
 
