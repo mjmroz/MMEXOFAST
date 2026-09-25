@@ -1789,7 +1789,7 @@ class MMEXOFASTFitter:
                     err = dataset.err_flux
                 np.savetxt(
                     dataset_path,
-                    np.column_stack((dataset.time, phot, err)), fmt="%.6f %.6f %.6f", delimiter=" ")
+                    np.column_stack((dataset.time, phot, err)), fmt="%.10f %.10f %.10f", delimiter=" ")
     
     def _build_renorm_event(self):
         """

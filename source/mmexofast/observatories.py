@@ -86,15 +86,32 @@ def set_filename_from_MulensData(mulensdata, suffix="MMEXOFAST"):
     suffix : str, optional
         Suffix to append to the filename (default: "")
     """
-    date =  Time(mulensdata.time[np.argmax(mulensdata.flux)], format='jd').strftime('%Y%m%d')
-    if mulensdata.telescope is None and mulensdata.bandpass is None:
-        telescope, band = get_telescope_band_from_filename(mulensdata.plot_properties["label"])
-        mulensdata.telescope = telescope
-        mulensdata.bandpass = band
-    else:
-        telescope = mulensdata.telescope if mulensdata.telescope else telescope_label
-        band = mulensdata.bandpass if mulensdata.bandpass else band_label
-        mulensdata.plot_properties["label"] = f"n{date}.{band}.{telescope}.{suffix}.dat".rstrip(".")
+    date = Time(
+        mulensdata.time[np.argmax(mulensdata.flux)], format="jd"
+    ).strftime("%Y%m%d")
+
+    telescope = getattr(mulensdata, "telescope", None)
+    band = getattr(mulensdata, "bandpass", None)
+
+    if telescope is None or band is None:
+        label = mulensdata.plot_properties.get("label")
+        if label is not None:
+            parsed_telescope, parsed_band = get_telescope_band_from_filename(label)
+            telescope = telescope if telescope is not None else parsed_telescope
+            band = band if band is not None else parsed_band
+
+    if telescope is None or band is None:
+        raise ValueError(
+            "Cannot determine telescope and band for MulensData; "
+            "set telescope/bandpass or use a filename label in the format "
+            "nYYYYMMDD.BAND.TELESCOPE.whateveryouwant."
+        )
+
+    mulensdata._telescope = telescope
+    mulensdata.bandpass = band
+    mulensdata.plot_properties["label"] = (
+        f"n{date}.{band}.{telescope}.{suffix}.dat".rstrip(".")
+    )
 
 
 # ============================================================================

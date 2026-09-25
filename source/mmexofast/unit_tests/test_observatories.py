@@ -2,6 +2,10 @@ import os.path
 import unittest
 from unittest import mock
 
+import numpy as np
+from astropy.time import Time
+import MulensModel
+
 import mmexofast as mmexo
 from mmexofast import config, dc18, observatories
 from mmexofast.config import DATA_PATH
@@ -284,6 +288,57 @@ class TestGetKwargs(unittest.TestCase):
 
         self.assertEqual(
             kwargs["plot_properties"]["label"], "n20100310.I.OGLE.event.txt"
+        )
+
+
+class TestSetFilenameFromMulensData(unittest.TestCase):
+    """Regression tests for filename generation from MulensData objects."""
+
+    def test_get_kwargs_sets_telescope_metadata(self):
+        """Known observatories should preserve telescope metadata in kwargs."""
+        kwargs = observatories.get_kwargs("n20100310.I.OGLE.OB140939.txt")
+
+        self.assertEqual(kwargs["bandpass"], "I")
+        self.assertEqual(kwargs["telescope"], "OGLE")
+
+    def test_set_filename_from_MulensData_uses_existing_metadata(self):
+        """Explicit telescope/band metadata should be preserved in the saved label."""
+        time = np.array([2450000.0, 2450001.0, 2450002.0])
+        flux = np.array([1.0, 3.0, 2.0])
+        dataset = MulensModel.MulensData(
+            data_list=[time, flux, np.ones_like(flux)],
+            phot_fmt="flux",
+            telescope="OGLE",
+            bandpass="I",
+            plot_properties={"label": "custom-label"},
+        )
+
+        observatories.set_filename_from_MulensData(dataset, suffix="MMEXOFAST")
+
+        expected_date = Time(2450001.0, format="jd").strftime("%Y%m%d")
+        self.assertEqual(
+            dataset.plot_properties["label"],
+            f"n{expected_date}.I.OGLE.MMEXOFAST.dat",
+        )
+
+    def test_set_filename_from_MulensData_rebuilds_from_original_label(self):
+        """If metadata is missing, parse it from the original filename label."""
+        time = np.array([2450000.0, 2450001.0, 2450002.0])
+        flux = np.array([1.0, 3.0, 2.0])
+        dataset = MulensModel.MulensData(
+            data_list=[time, flux, np.ones_like(flux)],
+            phot_fmt="flux",
+            plot_properties={"label": "n20100310.I.OGLE.OB140939.txt"},
+        )
+
+        observatories.set_filename_from_MulensData(dataset, suffix="renorm")
+
+        expected_date = Time(2450001.0, format="jd").strftime("%Y%m%d")
+        self.assertEqual(dataset.telescope, "OGLE")
+        self.assertEqual(dataset.bandpass, "I")
+        self.assertEqual(
+            dataset.plot_properties["label"],
+            f"n{expected_date}.I.OGLE.renorm.dat",
         )
 
 
