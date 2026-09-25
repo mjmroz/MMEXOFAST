@@ -429,7 +429,7 @@ class MMEXOFASTFitter:
         If 'grid' a parallax grid search will be performed at the end of point lens workflow. TODO: but what is the reason for that?
     parallax_binary_lens : bool or str
         Whether to include parallax in the binary lens fitting workflow.
-        Default is True (include parallax after static binary lens fit).
+        Default is False.
     primary_location : str, optional
         Location name to treat as primary (e.g. ``'ground'``, ``'Spitzer'``).
     primary_dataset : str, optional
