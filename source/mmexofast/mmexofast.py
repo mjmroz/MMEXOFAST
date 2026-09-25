@@ -52,7 +52,11 @@ from .gridsearches import (
     ParallaxGridSearch,
 )
 from .mulens_object_config import EventConfig, ModelConfig
-from .observatories import get_kwargs, get_telescope_band_from_filename
+from .observatories import (
+    get_kwargs,
+    get_telescope_band_from_filename,
+    set_filename_from_MulensData
+)
 from .results import (
     AllFitResults,
     FitRecord,
@@ -270,6 +274,7 @@ class OutputConfig:
     save_plots: bool = True
     save_grid_results: bool = False
     save_table: bool = False
+    save_datasets: bool = True
     table_formats: list = field(default_factory=lambda: ["latex"])
     save_exozippy_init: bool = False
 
@@ -1763,6 +1768,29 @@ class MMEXOFASTFitter:
         )
         self.event_config = self._build_event_config()
 
+        if self._output_config:
+            self._save_datasets(suffix="MMEXOFAST_renorm", datasets=self.datasets)
+
+    def _save_datasets(self, suffix ="", datasets=None) -> None:
+        """
+        Save the datasets to the output directory.
+        """
+        if self._output_config.save_datasets and datasets is not None:
+            path = self._output_config.output_dir
+            path.mkdir(parents=True, exist_ok=True)
+            for dataset in datasets:
+                set_filename_from_MulensData(dataset, suffix=suffix)
+                dataset_path = os.path.join(path, dataset.plot_properties["label"])
+                if dataset.input_fmt == 'mag':
+                    phot = dataset.mag
+                    err = dataset.err_mag
+                else:
+                    phot = dataset.flux
+                    err = dataset.err_flux
+                np.savetxt(
+                    dataset_path,
+                    np.column_stack((dataset.time, phot, err)), fmt="%.6f %.6f %.6f", delimiter=" ")
+    
     def _build_renorm_event(self):
         """
         Build and fit the reference event used throughout renormalization.
@@ -3281,6 +3309,7 @@ class MMEXOFASTFitter:
             If any dataset has neither ``file_name`` nor a label.
         """
         for i, dataset in enumerate(self.datasets):
+            set_filename_from_MulensData(dataset)
             label = dataset.plot_properties.get("label")
             if not label:
                 if getattr(dataset, "file_name", None):

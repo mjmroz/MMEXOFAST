@@ -1,4 +1,6 @@
 import os.path
+import numpy as np
+from astropy.time import Time
 
 from .config import PACKAGE_DATA_PATH
 from .dc18 import get_ephemerides as get_dc18_ephemerides
@@ -32,6 +34,7 @@ def get_kwargs(filename):
         kwargs = obs.get_kwargs()
         kwargs["bandpass"] = band
         kwargs["plot_properties"] = obs.get_plot_properties(band)
+        kwargs["telescope"] = telescope
         # Override label with filename
         kwargs["plot_properties"]["label"] = label
     else:
@@ -72,6 +75,26 @@ def get_telescope_band_from_filename(filename):
     band = basename[1]
     telescope = basename[2]
     return telescope, band
+
+def set_filename_from_MulensData(mulensdata, suffix="MMEXOFAST"):
+    """
+    Construct a filename stored in the MulensData.plot_properties object.
+    Parameters
+    ----------
+    mulensdata : MulensData
+        MulensData object
+    suffix : str, optional
+        Suffix to append to the filename (default: "")
+    """
+    date =  Time(mulensdata.time[np.argmax(mulensdata.flux)], format='jd').strftime('%Y%m%d')
+    if mulensdata.telescope is None and mulensdata.bandpass is None:
+        telescope, band = get_telescope_band_from_filename(mulensdata.plot_properties["label"])
+        mulensdata.telescope = telescope
+        mulensdata.bandpass = band
+    else:
+        telescope = mulensdata.telescope if mulensdata.telescope else telescope_label
+        band = mulensdata.bandpass if mulensdata.bandpass else band_label
+        mulensdata.plot_properties["label"] = f"n{date}.{band}.{telescope}.{suffix}.dat".rstrip(".")
 
 
 # ============================================================================
