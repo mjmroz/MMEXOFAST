@@ -55,7 +55,7 @@ from .mulens_object_config import EventConfig, ModelConfig
 from .observatories import (
     get_kwargs,
     get_telescope_band_from_filename,
-    set_filename_from_MulensData
+    set_filename_from_MulensData,
 )
 from .results import (
     AllFitResults,
@@ -1769,9 +1769,11 @@ class MMEXOFASTFitter:
         self.event_config = self._build_event_config()
 
         if self._output_config:
-            self._save_datasets(suffix="MMEXOFAST_renorm", datasets=self.datasets)
+            self._save_datasets(
+                suffix="MMEXOFAST_renorm", datasets=self.datasets
+            )
 
-    def _save_datasets(self, suffix ="", datasets=None) -> None:
+    def _save_datasets(self, suffix="", datasets=None) -> None:
         """
         Save the datasets to the output directory.
         """
@@ -1780,8 +1782,10 @@ class MMEXOFASTFitter:
             path.mkdir(parents=True, exist_ok=True)
             for dataset in datasets:
                 set_filename_from_MulensData(dataset, suffix=suffix)
-                dataset_path = os.path.join(path, dataset.plot_properties["label"])
-                if dataset.input_fmt == 'mag':
+                dataset_path = os.path.join(
+                    path, dataset.plot_properties["label"]
+                )
+                if dataset.input_fmt == "mag":
                     phot = dataset.mag
                     err = dataset.err_mag
                 else:
@@ -1789,8 +1793,11 @@ class MMEXOFASTFitter:
                     err = dataset.err_flux
                 np.savetxt(
                     dataset_path,
-                    np.column_stack((dataset.time, phot, err)), fmt="%.10f %.10f %.10f", delimiter=" ")
-    
+                    np.column_stack((dataset.time, phot, err)),
+                    fmt="%.10f %.10f %.10f",
+                    delimiter=" ",
+                )
+
     def _build_renorm_event(self):
         """
         Build and fit the reference event used throughout renormalization.

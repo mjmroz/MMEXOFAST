@@ -4,7 +4,6 @@ from unittest import mock
 
 import numpy as np
 from astropy.time import Time
-import MulensModel
 
 import mmexofast as mmexo
 from mmexofast import config, dc18, observatories

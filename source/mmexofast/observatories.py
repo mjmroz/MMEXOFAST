@@ -1,4 +1,5 @@
 import os.path
+
 import numpy as np
 from astropy.time import Time
 
@@ -76,6 +77,7 @@ def get_telescope_band_from_filename(filename):
     telescope = basename[2]
     return telescope, band
 
+
 def set_filename_from_MulensData(mulensdata, suffix="MMEXOFAST"):
     """
     Construct a filename stored in the MulensData.plot_properties object.
@@ -96,8 +98,12 @@ def set_filename_from_MulensData(mulensdata, suffix="MMEXOFAST"):
     if telescope is None or band is None:
         label = mulensdata.plot_properties.get("label")
         if label is not None:
-            parsed_telescope, parsed_band = get_telescope_band_from_filename(label)
-            telescope = telescope if telescope is not None else parsed_telescope
+            parsed_telescope, parsed_band = get_telescope_band_from_filename(
+                label
+            )
+            telescope = (
+                telescope if telescope is not None else parsed_telescope
+            )
             band = band if band is not None else parsed_band
 
     if telescope is None or band is None:
