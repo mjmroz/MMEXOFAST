@@ -656,8 +656,12 @@ class WideAxisParameterEstimator(ParameterEstimator):
         float
         """
         if self._q is None:
-            self._q = 0.5 * np.abs(self.delta_A) * (self.rho**2)
-
+        #     self._q = 0.5 * np.abs(self.delta_A) * (self.rho**2)
+            self._q = (
+                (self.s * self.params["dt"] / self.params["t_E"] / 4.0) ** 2
+                * ((self.s**2) +1)
+                * np.sin(np.deg2rad(self.alpha)) ** 2
+            )
         return self._q
 
     @property
@@ -1960,9 +1964,9 @@ class CloseUpperParameterEstimator(WideAxisParameterEstimator):
                 "Use 'dwarf', 'giant', or 'point'."
             )
         super().__init__(params, limit=limit)
-        if q is None:
-            q = 0.004
-        self._q = q
+        # if q is None:
+        #     q = 0.004
+        # self._q = q
         if rho is not None:
             self._rho = rho
         self._eta_not, self._mu, self._phi = None, None, None
@@ -2083,7 +2087,9 @@ class CloseUpperParameterEstimator(WideAxisParameterEstimator):
 
     @property
     def q(self):
-        """Planet-to-star mass ratio, set at construction (default 0.004)."""
+        #"""Planet-to-star mass ratio, set at construction (default 0.004)."""
+        if self._q is None:
+            self._q = (self.self.params["dt"] / self.t_E) **2.
         return self._q
 
     @property

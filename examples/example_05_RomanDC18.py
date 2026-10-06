@@ -29,9 +29,10 @@ def fit_lc(lc_num, verbose=False):
         verbose=verbose,
         renormalize_errors=False,
         no_parallax=True,
+        stop_after="fit_binary_lens:estimate_binary_lens_parameters",
+
         log_file=os.path.join(output_dir, file_prefix + ".log"),
         restart_file=os.path.join(output_dir, file_prefix + ".pkl"),
-        # stop_after='fit_binary_lens:estimate_binary_lens_parameters',
         limb_darkening_coeffs_gamma={"W149": 0.0, "Z087": 0.0},
         output_config=mmexo.OutputConfig(
             output_dir=Path(output_dir),
@@ -40,6 +41,7 @@ def fit_lc(lc_num, verbose=False):
             save_table=True,
             save_exozippy_init=False,
         ),
+
     )
     try:
         fitter.fit()
@@ -72,7 +74,7 @@ slow_parallax = [124, 128, 217]  # 66 is broke
 dip_anom = [47, 74, 95, 103]
 bad_t0 = [12, 40, 81, 107, 208, 217, 227]
 
-lc_nums = [74]
+# lc_nums = [74]
 for lc_num in np.sort(lc_nums):
     print("\n...Fitting light curve {0}...".format(lc_num))
     try:
