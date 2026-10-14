@@ -553,6 +553,7 @@ class WideAxisParameterEstimator(ParameterEstimator):
         super().__init__(params, limit=limit)
         self._delta_A = None
         self._a_pspl = None
+        self._q_limit = 1e-5
 
     def get_rho(self):
         """
@@ -662,6 +663,8 @@ class WideAxisParameterEstimator(ParameterEstimator):
                 * ((self.s**2) +1)
                 * np.sin(np.deg2rad(self.alpha)) ** 2
             )
+            if self._q < self._q_limit:
+                self._q = self._q_limit
         return self._q
 
     @property
@@ -2090,6 +2093,8 @@ class CloseUpperParameterEstimator(WideAxisParameterEstimator):
         #"""Planet-to-star mass ratio, set at construction (default 0.004)."""
         if self._q is None:
             self._q = (self.self.params["dt"] / self.t_E) **2.
+            if self._q < self._q_limit:
+                self._q = self._q_limit
         return self._q
 
     @property
@@ -2426,6 +2431,8 @@ class CloseAxisParameterEstimator(WideAxisParameterEstimator):
                 * (self.s / self.u_0)
                 * np.abs((np.sin(np.deg2rad(self.alpha))) ** 3)
             )
+            if self._q < self._q_limit:
+                self._q = self._q_limit
         return self._q
 
     @property
