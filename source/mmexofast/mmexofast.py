@@ -2478,6 +2478,8 @@ class MMEXOFASTFitter:
         ) and self._output_config.save_plots:
             self._plot_initial_2L1S_guess()
 
+        self._save_restart_state()
+
     def _anomaly_classification_backward_compatibility(self):
         """
         Handle backward compatibility for anomaly classification (old: wide/close -> new: bump/dip).

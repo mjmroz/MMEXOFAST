@@ -869,3 +869,15 @@ class IntermediateResults:
                 f"Must be one of {self.VALID_ANOMALY_TYPES}."
             )
         self._anomaly_type = value
+
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        state["anomaly_type"] = self.anomaly_type
+        state.pop("_anomaly_type", None)
+        return state
+
+    def __setstate__(self, state):
+        anomaly_type = state.pop("anomaly_type", None)
+        self.__dict__.update(state)
+        self._anomaly_type = None
+        self.anomaly_type = anomaly_type

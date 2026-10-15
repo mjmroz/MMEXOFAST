@@ -2092,7 +2092,7 @@ class CloseUpperParameterEstimator(WideAxisParameterEstimator):
     def q(self):
         #"""Planet-to-star mass ratio, set at construction (default 0.004)."""
         if self._q is None:
-            self._q = (self.self.params["dt"] / self.t_E) **2.
+            self._q = (self.params["dt"] / self.t_E) **2.
             if self._q < self._q_limit:
                 self._q = self._q_limit
         return self._q
