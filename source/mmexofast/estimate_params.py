@@ -776,6 +776,8 @@ class WideAxisGridSearchEstimator(WideAxisParameterEstimator):
         n_alpha=None,
         d_s=None,
         n_s=None,
+        d_log_q=None,
+        n_log_q=None,
         log_q_values=None,
         log_rho_values=None,
         alpha_grid=None,
@@ -795,6 +797,8 @@ class WideAxisGridSearchEstimator(WideAxisParameterEstimator):
         self.n_alpha = n_alpha
         self.d_s = d_s
         self.n_s = n_s
+        self.d_log_q = d_log_q
+        self.n_log_q = n_log_q
         self.log_q_values = log_q_values
         self.log_rho_values = log_rho_values
         self._alpha_grid = alpha_grid
@@ -1027,19 +1031,19 @@ class WideAxisGridSearchEstimator(WideAxisParameterEstimator):
     def log_q_grid(self):
         """
         Grid values of log10(q) for the grid search.
-
-        Returns ``log_q_values`` if provided at construction, otherwise
-        defaults to ``numpy.arange(-6, -1)``.
-
+        If ``log_q_values`` was provided at construction, returns that directly.
+        Otherwise, constructs a uniform grid of ``n_log_q=4`` points centered
+        on the analytic ``log10(q)`` estimate with step size ``d_log_q=0.1``.
         Returns
         -------
         numpy.ndarray
         """
-        return (
-            self.log_q_values
-            if self.log_q_values is not None
-            else np.arange(-6, -1)
-        )
+        if self.log_q_values is not None:
+            return self.log_q_values
+        d_log_q = self.d_log_q if self.d_log_q is not None else 0.1
+        n_log_q = self.n_log_q if self.n_log_q is not None else 4
+        q_offset = np.arange(n_log_q) - (n_log_q - 1) / 2
+        return np.log10(self.q) + q_offset * d_log_q
 
     @property
     def log_rho_grid(self):
@@ -2036,25 +2040,6 @@ class CloseUpperParameterEstimator(WideAxisParameterEstimator):
 
         return new_params
 
-    @property
-    def log_q_grid(self):
-        """
-        Grid values of log10(q) for the grid search.
-
-        Returns ``log_q_values`` if provided at construction, otherwise
-        defaults to ``numpy.array([-2.5, -2, -1, -0.5])``, which spans
-        the mass ratio range appropriate for close binary models.
-
-        Returns
-        -------
-        numpy.ndarray
-        """
-        # TODO: Does this go here or in CloseUpperGridSearchEstimator?
-        return (
-            self.log_q_values
-            if self.log_q_values is not None
-            else np.array([-2.5, -2, -1, -0.5])
-        )
 
     @property
     def s(self):
