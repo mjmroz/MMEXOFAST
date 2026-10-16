@@ -1035,7 +1035,7 @@ class WideAxisGridSearchEstimator(WideAxisParameterEstimator):
         """
         Grid values of log10(q) for the grid search.
         If ``log_q_values`` was provided at construction, returns that directly.
-        Otherwise, it do not construct a grid and returns a single value of ``log10(q)`` from the analytic estimate.
+        Otherwise, it does not construct a grid and returns a single value of ``log10(q)`` from the analytic estimate.
         Returns
         -------
         numpy.ndarray
@@ -2406,10 +2406,11 @@ class CloseAxisParameterEstimator(WideAxisParameterEstimator):
         Planet-to-star mass ratio.
 
         Estimated from the anomaly duration and source trajectory geometry as
-        ``(dt / t_E / 4)^2 * (s / (1/s - s)) * sin(alpha)^2``. 
+        ``(dt / t_E / 4)^2 * (s / u_0) * |sin(alpha)^3|``.
 
-        See Han 2006 eg 12, 13
-        https://ui.adsabs.harvard.edu/abs/2006ApJ...638.1080H/abstract
+        See Hwang et al. 2022
+        https://ui.adsabs.harvard.edu/abs/2022AJ....163...43H/abstract
+
         Returns
         -------
         float
@@ -2417,11 +2418,9 @@ class CloseAxisParameterEstimator(WideAxisParameterEstimator):
         if self._q is None:
             self._q = (
                 (self.params["dt"] / self.params["t_E"] / 4.0) ** 2
-                * (self.s / (1/self.s - self.s))
-                * (np.sin(np.deg2rad(self.alpha)) ** 2)
+                * (self.s / self.u_0)
+                * np.abs((np.sin(np.deg2rad(self.alpha))) ** 3)
             )
-            if self._q < self._q_limit:
-                self._q = self._q_limit
         return self._q
 
     @property
