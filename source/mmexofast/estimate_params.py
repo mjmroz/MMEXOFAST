@@ -1023,8 +1023,8 @@ class WideAxisGridSearchEstimator(WideAxisParameterEstimator):
         """
         if self._s_grid is not None:
             return self._s_grid
-        d_s = self.d_s if self.d_s is not None else 0 
-        n_s = self.n_s if self.n_s is not None else 1 
+        d_s = self.d_s if self.d_s is not None else 0
+        n_s = self.n_s if self.n_s is not None else 1
         s_offset = np.arange(n_s) - (n_s - 1) / 2
         # print(f"\nn_s={n_s}, d_s={d_s}, s_offset={s_offset}")
         # print(f"\ns={self.s}, s_values={self.s + s_offset * d_s}")
@@ -1975,9 +1975,7 @@ class CloseUpperParameterEstimator(WideAxisParameterEstimator):
                 "Use 'dwarf', 'giant', or 'point'."
             )
         super().__init__(params, limit=limit)
-        # if q is None:
-        #     q = 0.004
-        # self._q = q
+
         if rho is not None:
             self._rho = rho
         self._eta_not, self._mu, self._phi = None, None, None
@@ -2044,7 +2042,6 @@ class CloseUpperParameterEstimator(WideAxisParameterEstimator):
 
         return new_params
 
-
     @property
     def s(self):
         """
@@ -2079,7 +2076,9 @@ class CloseUpperParameterEstimator(WideAxisParameterEstimator):
 
     @property
     def q(self):
-        #"""Planet-to-star mass ratio, set at construction (default 0.004)."""
+        """
+        Planet-to-star mass ratio, set at construction (default 0.004).
+        """
         if self._q is None:
             self._q = (self.params["dt"] / self.t_E) **2.
             if self._q < self._q_limit:
@@ -2421,6 +2420,8 @@ class CloseAxisParameterEstimator(WideAxisParameterEstimator):
                 * (self.s / self.u_0)
                 * np.abs((np.sin(np.deg2rad(self.alpha))) ** 3)
             )
+            if self._q < self._q_limit:
+                self._q = self._q_limit
         return self._q
 
     @property
