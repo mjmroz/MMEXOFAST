@@ -658,10 +658,10 @@ class WideAxisParameterEstimator(ParameterEstimator):
         https://ui.adsabs.harvard.edu/abs/2006ApJ...638.1080H/abstract
         """
         if self._q is None:
-        #     self._q = 0.5 * np.abs(self.delta_A) * (self.rho**2)
+            #     self._q = 0.5 * np.abs(self.delta_A) * (self.rho**2)
             self._q = (
                 (self.s * self.params["dt"] / self.params["t_E"] / 4.0) ** 2
-                * ((self.s**2) +1)
+                * ((self.s**2) + 1)
                 * np.sin(np.deg2rad(self.alpha)) ** 2
             )
             if self._q < self._q_limit:
@@ -2080,7 +2080,7 @@ class CloseUpperParameterEstimator(WideAxisParameterEstimator):
         Planet-to-star mass ratio, set at construction (default 0.004).
         """
         if self._q is None:
-            self._q = (self.params["dt"] / self.t_E) **2.
+            self._q = (self.params["dt"] / self.t_E) ** 2.0
             if self._q < self._q_limit:
                 self._q = self._q_limit
         return self._q
