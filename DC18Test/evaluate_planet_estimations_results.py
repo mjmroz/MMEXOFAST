@@ -12,20 +12,22 @@ import pandas as pd
 
 from DC18_classes import DC18Answers
 
-prefix = 'no_par_small_grid'  # or 'no_par_original'
+prefix = "no_par_small_grid"  # or 'no_par_original'
 # prefix = 'no_par_original'  # or 'no_par_small_grid'
 # prefix = 'no_par_smaller_grid_0.01'  # or 'no_par_small_grid'
 # prefix = 'no_par_smaller_grid_0.0'  # or 'no_par_small_grid'
 # prefix = 'no_par_no_grid'  # or 'no_par_small_grid'
 # prefix = 'no_par_no_grid_close_qmodf'  # or 'no_par_small_grid'
 prefixs = [
-    'no_par_no_grid_close_qmodf',
-    'no_par_no_grid',
-    'no_par_smaller_grid_0.01',
-    'no_par_smaller_grid_0.0',
-    'no_par_small_grid',
-    'no_par_original',
+    "no_par_no_grid_close_qmodf",
+    "no_par_no_grid",
+    "no_par_smaller_grid_0.01",
+    "no_par_smaller_grid_0.0",
+    "no_par_small_grid",
+    "no_par_original",
 ]
+
+
 class SelectionStrategy(Enum):
     """
     Determines which estimated parameter sets are used for evaluation.
@@ -96,20 +98,30 @@ def get_results() -> pd.DataFrame:
 
     for results_file in results_files:
         lc_num = int(os.path.basename(results_file).split(".")[1])
-        
-        with open(results_file, 'rb') as f:
+
+        with open(results_file, "rb") as f:
             results_one = pickle.load(f)
 
-        if results_one['state']['intermediate_results'].estimate_binary_lens_parameters is None:
+        if (
+            results_one["state"][
+                "intermediate_results"
+            ].estimate_binary_lens_parameters
+            is None
+        ):
             failed.append(lc_num)
             continue
-        if results_one['state']['intermediate_results'].anomaly_type == 'high_mag':
+        if (
+            results_one["state"]["intermediate_results"].anomaly_type
+            == "high_mag"
+        ):
             hm.append(lc_num)
             continue
 
         lc_params = []
         current_solution_type = None
-        for key, value in results_one['state']['intermediate_results'].estimate_binary_lens_parameters.items():
+        for key, value in results_one["state"][
+            "intermediate_results"
+        ].estimate_binary_lens_parameters.items():
             params = value.ulens.copy()
             params["idx"] = lc_num - 1
             params["solution_type"] = key
@@ -121,7 +133,7 @@ def get_results() -> pd.DataFrame:
             params["t_0"] -= 2458234.0
             params["alpha"] = params["alpha"] % 360.0
             lc_params.append(params)
-        
+
         if lc_params:
             results.extend(lc_params)
         else:
@@ -285,8 +297,9 @@ class EvaluateResults:
                 self.all_results["q_true"] - self.all_results["q"]
             )
             self.all_results["delta_sq"] = np.sqrt(
-                self.all_results["delta_s"] ** 2 + self.all_results["delta_q"] ** 2
-            )   
+                self.all_results["delta_s"] ** 2
+                + self.all_results["delta_q"] ** 2
+            )
             # self.all_results['delta_s'].min(groupby='lc_num')
             idx = []
             for lc_num in self.all_results["lc_num"].unique():
@@ -365,7 +378,6 @@ class EvaluateResults:
                         np.full(tri_mask.sum(), tri_y),
                         marker=tri_marker,
                         c=colors[tri_mask],
-                        
                         facecolors=facecolors[tri_mask],
                         clip_on=False,
                         zorder=3,
@@ -497,8 +509,12 @@ class EvaluateResults:
         self.print_indices(good)
 
     def is_there_a_good_guess(self):
-        self.results['sol_dist'] = np.sqrt((np.log10(self.results['s_true']) - np.log10(self.results['s']))**2 +
-                                      (np.log10(self.results['q_true']) - np.log10(self.results['q']))**2)
+        self.results["sol_dist"] = np.sqrt(
+            (np.log10(self.results["s_true"]) - np.log10(self.results["s"]))
+            ** 2
+            + (np.log10(self.results["q_true"]) - np.log10(self.results["q"]))
+            ** 2
+        )
         # self.results["sol_dist"] = np.abs(
         #     self.results["s_true"] - self.results["s"]
         # )
@@ -529,13 +545,13 @@ class EvaluateResults:
             value = np.log10(true_value)
             xlabel = f"log ({key}_true)"
             ylabel = f"log({key}) - log(True)"
-            ylim = (-6,-1)
+            ylim = (-6, -1)
         if log and key == "rho":
             delta = np.log10(fit_value) - np.log10(true_value)
             value = np.log10(true_value)
             xlabel = f"log ({key}_true)"
             ylabel = f"log({key}) - log(True)"
-            ylim = (-4,1)
+            ylim = (-4, 1)
         else:
             value = true_value
             delta = fit_value - true_value
@@ -564,7 +580,9 @@ class EvaluateResults:
         }
         for key, log in plot_list.items():
             self._make_scatter_plot(key, log=log)  # _plot() creates the figure
-            plt.savefig(f"temp_output/{self.prefix}/figs/{key}_deltas.png", dpi=300)
+            plt.savefig(
+                f"temp_output/{self.prefix}/figs/{key}_deltas.png", dpi=300
+            )
 
     def make_scatter_plot(self, key, log=False):
         fit_value = self.results[key]
@@ -598,7 +616,9 @@ class EvaluateResults:
             self.make_scatter_plot(key, log=(key in ("q", "rho")))
             if not os.path.exists(f"temp_output/{self.prefix}/figs/"):
                 os.makedirs(f"temp_output/{self.prefix}/figs/")
-            plt.savefig(f"temp_output/{self.prefix}/figs/{key}_vs.png", dpi=300)
+            plt.savefig(
+                f"temp_output/{self.prefix}/figs/{key}_vs.png", dpi=300
+            )
 
     def make_planet_plots(self):
         keys = ["s", "q"]
@@ -619,8 +639,12 @@ class EvaluateResults:
         plt.gca().set_aspect(1)
         plt.legend(loc="upper left", frameon=False)
         plt.tight_layout()
-        plt.title(f"strategy: {self.strategy.value} ({len(self.results)} rows) prefix: {self.prefix}")
-        plt.savefig(f"temp_output/{self.prefix}/figs/planet_deltas.png", dpi=300)
+        plt.title(
+            f"strategy: {self.strategy.value} ({len(self.results)} rows) prefix: {self.prefix}"
+        )
+        plt.savefig(
+            f"temp_output/{self.prefix}/figs/planet_deltas.png", dpi=300
+        )
 
 
 def check_bad_t0(evaluator):
@@ -645,11 +669,20 @@ def check_bad_t0(evaluator):
 if __name__ == "__main__":
     for p in prefixs:
         prefix = p
-        
+
         print("\nPrefix:", prefix)
-        truth = ["lc_num", "u0_true", "tE_true", "s_true", "q_true", "rhos_true"]
+        truth = [
+            "lc_num",
+            "u0_true",
+            "tE_true",
+            "s_true",
+            "q_true",
+            "rhos_true",
+        ]
         evaluator = EvaluateResults(strategy=SelectionStrategy.BEST_S_AND_Q)
-        with pd.option_context("display.width", None, "display.max_rows", None):
+        with pd.option_context(
+            "display.width", None, "display.max_rows", None
+        ):
             print(evaluator.results[truth].sort_values(by="lc_num"))
         check_bad_t0(evaluator)
 
@@ -662,7 +695,7 @@ if __name__ == "__main__":
         evaluator.make_all_delta_plots()
 
         evaluator.make_planet_plots()
-        #plt.show()
+        # plt.show()
 
         # Switch strategies at any time without re-parsing:
         # evaluator.set_strategy(SelectionStrategy.PRIMARY_FIRST)
