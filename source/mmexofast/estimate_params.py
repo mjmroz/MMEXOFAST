@@ -650,11 +650,12 @@ class WideAxisParameterEstimator(ParameterEstimator):
         """
         Planet-to-star mass ratio.
 
-        Estimated from the anomaly as ``0.5 * |delta_A| * rho^2``.
+        Estimated from the anomaly duration and source trajectory geometry as
+        ``(s * dt / t_E / 4)^2 * (s^2 + 1) * sin(alpha)^2``. This is a
+        simplified approximation for the mass ratio of a planetary system.
 
-        Returns
-        -------
-        float
+        See Han et al. 2006 eq. 9.
+        https://ui.adsabs.harvard.edu/abs/2006ApJ...638.1080H/abstract
         """
         if self._q is None:
         #     self._q = 0.5 * np.abs(self.delta_A) * (self.rho**2)
@@ -1022,9 +1023,11 @@ class WideAxisGridSearchEstimator(WideAxisParameterEstimator):
         """
         if self._s_grid is not None:
             return self._s_grid
-        d_s = self.d_s if self.d_s is not None else 0.01 * self.s
-        n_s = self.n_s if self.n_s is not None else 4
+        d_s = self.d_s if self.d_s is not None else 0 
+        n_s = self.n_s if self.n_s is not None else 1 
         s_offset = np.arange(n_s) - (n_s - 1) / 2
+        # print(f"\nn_s={n_s}, d_s={d_s}, s_offset={s_offset}")
+        # print(f"\ns={self.s}, s_values={self.s + s_offset * d_s}")
         return self.s + s_offset * d_s
 
     @property
@@ -1032,17 +1035,18 @@ class WideAxisGridSearchEstimator(WideAxisParameterEstimator):
         """
         Grid values of log10(q) for the grid search.
         If ``log_q_values`` was provided at construction, returns that directly.
-        Otherwise, constructs a uniform grid of ``n_log_q=4`` points centered
-        on the analytic ``log10(q)`` estimate with step size ``d_log_q=0.1``.
+        Otherwise, it do not construct a grid and returns a single value of ``log10(q)`` from the analytic estimate.
         Returns
         -------
         numpy.ndarray
         """
         if self.log_q_values is not None:
             return self.log_q_values
-        d_log_q = self.d_log_q if self.d_log_q is not None else 0.1
-        n_log_q = self.n_log_q if self.n_log_q is not None else 4
+        d_log_q = self.d_log_q if self.d_log_q is not None else 0.0
+        n_log_q = self.n_log_q if self.n_log_q is not None else 1
         q_offset = np.arange(n_log_q) - (n_log_q - 1) / 2
+        # print(f"\nn_log_q={n_log_q}, d_log_q={d_log_q}, q_offset={q_offset}")
+        # print(f"\nq={self.q}, log_q_grid={np.log10(self.q) + q_offset * d_log_q}")
         return np.log10(self.q) + q_offset * d_log_q
 
     @property
@@ -2384,7 +2388,8 @@ class CloseAxisParameterEstimator(WideAxisParameterEstimator):
         Computed as ``|0.5 * (sqrt(u_pl^2 + 4) - u_pl)|``.
         This is the close-topology solution (s < 1).
 
-        See Han 2006 https://ui.adsabs.harvard.edu/abs/2006ApJ...638.1080H/abstract
+        See Han 2006
+        https://ui.adsabs.harvard.edu/abs/2006ApJ...638.1080H/abstract
 
         Returns
         -------
@@ -2401,11 +2406,10 @@ class CloseAxisParameterEstimator(WideAxisParameterEstimator):
         Planet-to-star mass ratio.
 
         Estimated from the anomaly duration and source trajectory geometry as
-        ``(dt / t_E / 4)^2 * (s / u_0) * |sin(alpha)^3|``.
+        ``(dt / t_E / 4)^2 * (s / (1/s - s)) * sin(alpha)^2``. 
 
-        See Hwang et al. 2022
-        https://ui.adsabs.harvard.edu/abs/2022AJ....163...43H/abstract
-
+        See Han 2006 eg 12, 13
+        https://ui.adsabs.harvard.edu/abs/2006ApJ...638.1080H/abstract
         Returns
         -------
         float
@@ -2413,8 +2417,8 @@ class CloseAxisParameterEstimator(WideAxisParameterEstimator):
         if self._q is None:
             self._q = (
                 (self.params["dt"] / self.params["t_E"] / 4.0) ** 2
-                * (self.s / self.u_0)
-                * np.abs((np.sin(np.deg2rad(self.alpha))) ** 3)
+                * (self.s / (1/self.s - self.s))
+                * (np.sin(np.deg2rad(self.alpha)) ** 2)
             )
             if self._q < self._q_limit:
                 self._q = self._q_limit
