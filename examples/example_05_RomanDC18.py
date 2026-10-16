@@ -30,7 +30,6 @@ def fit_lc(lc_num, verbose=False):
         renormalize_errors=False,
         no_parallax=True,
         stop_after="fit_binary_lens:estimate_binary_lens_parameters",
-
         log_file=os.path.join(output_dir, file_prefix + ".log"),
         restart_file=os.path.join(output_dir, file_prefix + ".pkl"),
         limb_darkening_coeffs_gamma={"W149": 0.0, "Z087": 0.0},
@@ -41,7 +40,6 @@ def fit_lc(lc_num, verbose=False):
             save_table=True,
             save_exozippy_init=False,
         ),
-
     )
     try:
         fitter.fit()
