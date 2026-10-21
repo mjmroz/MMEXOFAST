@@ -148,6 +148,38 @@ class TestFlatSFitFunction(unittest.TestCase):
         self.skipTest(" NotImplemented")
 
 
+class TestBinaryGridSearch(unittest.TestCase):
+    def test_run_uses_binary_grid_configuration(self):
+        search = gridsearches.BinaryGridSearch(
+            datasets=[],
+            static_params={},
+            s_min=0.5,
+            s_max=2.0,
+            s_n=2,
+            q_min=0.01,
+            q_max=0.1,
+            q_n=2,
+            alpha_min=0.0,
+            alpha_max=30.0,
+            alpha_step=30.0,
+        )
+        search._fit_grid_point = lambda params: {
+            "chi2": sum(params.values()),
+            "params": {},
+            "success": True,
+        }
+
+        search.run()
+
+        self.assertEqual(len(search.results), 8)
+        np.testing.assert_allclose(
+            sorted(search.results["s"].unique()), [0.5, 2.0]
+        )
+        np.testing.assert_allclose(
+            sorted(search.results["q"].unique()), [0.01, 0.1]
+        )
+
+
 class TestEFSFitFunction(unittest.TestCase):
     def test_calc_model(self):
         self.skipTest(" NotImplemented")

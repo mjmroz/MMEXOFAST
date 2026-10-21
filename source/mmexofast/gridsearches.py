@@ -3532,9 +3532,10 @@ class BinaryGridSearch(BaseRectGridSearch):
 
         self.static_params = static_params.copy()
 
-        # If grid_params dict is provided, use it; otherwise build from individual params
+        # Keep the binary-search configuration separate from the rectangular
+        # grid specification consumed by BaseRectGridSearch.
         if grid_params is not None:
-            self.grid_params = grid_params.copy()
+            binary_grid_params = grid_params.copy()
             # Validate required keys
             required_keys = [
                 "s_min",
@@ -3550,14 +3551,14 @@ class BinaryGridSearch(BaseRectGridSearch):
                 "alpha_step",
             ]
             missing_keys = [
-                k for k in required_keys if k not in self.grid_params
+                k for k in required_keys if k not in binary_grid_params
             ]
             if missing_keys:
                 raise ValueError(
                     f"grid_params missing required keys: {missing_keys}"
                 )
         else:
-            self.grid_params = {
+            binary_grid_params = {
                 "s_min": s_min,
                 "s_max": s_max,
                 "s_n": s_n,
@@ -3571,51 +3572,50 @@ class BinaryGridSearch(BaseRectGridSearch):
                 "alpha_step": alpha_step,
             }
 
+        self.binary_grid_params = binary_grid_params
+        self.grid_params = {
+            "s": [
+                binary_grid_params["s_min"],
+                binary_grid_params["s_max"],
+                self._grid_step(
+                    binary_grid_params["s_min"],
+                    binary_grid_params["s_max"],
+                    binary_grid_params["s_n"],
+                ),
+            ],
+            "q": [
+                binary_grid_params["q_min"],
+                binary_grid_params["q_max"],
+                self._grid_step(
+                    binary_grid_params["q_min"],
+                    binary_grid_params["q_max"],
+                    binary_grid_params["q_n"],
+                ),
+            ],
+            "alpha": [
+                binary_grid_params["alpha_min"],
+                binary_grid_params["alpha_max"],
+                binary_grid_params["alpha_step"],
+            ],
+        }
         self.fitter_kwargs = fitter_kwargs if fitter_kwargs is not None else {}
 
-    def _setup_grid(self):
-        """Set up rectangular grid over s, q, and alpha"""
-        # Create s grid (log or linear)
-        if self.grid_params["s_log"]:
-            s_array = self._log_grid_1d(
-                self.grid_params["s_min"],
-                self.grid_params["s_max"],
-                self.grid_params["s_n"],
-            )
-        else:
-            # For linear spacing, would need s_step parameter
-            raise NotImplementedError(
-                "Linear spacing for s not implemented. Use s_log=True."
-            )
+    @staticmethod
+    def _grid_step(min_val, max_val, n):
+        """Return a valid rectangular-grid step for a requested point count."""
+        if n < 1:
+            raise ValueError("Grid point counts must be positive.")
+        return (max_val - min_val) / max(n - 1, 1)
 
-        # Create q grid (log or linear)
-        if self.grid_params["q_log"]:
-            q_array = self._log_grid_1d(
-                self.grid_params["q_min"],
-                self.grid_params["q_max"],
-                self.grid_params["q_n"],
-            )
-        else:
-            raise NotImplementedError(
-                "Linear spacing for q not implemented. Use q_log=True."
-            )
-
-        # Create alpha grid (always linear)
-        alpha_array = self._linear_grid_1d(
-            self.grid_params["alpha_min"],
-            self.grid_params["alpha_max"],
-            self.grid_params["alpha_step"],
-        )
-
-        self._grid = self._make_rect_grid(
-            [s_array, q_array, alpha_array], ["s", "q", "alpha"]
-        )
-
-        if self.verbose:
-            print(
-                f"Grid setup: {len(s_array)} s × {len(q_array)} q × "
-                f"{len(alpha_array)} alpha = {len(self._grid)} total points"
-            )
+    def _build_param_array(self, name, spec):
+        """Build binary grids using the legacy linear/log configuration."""
+        if name in ("s", "q"):
+            config_name = f"{name}_log"
+            min_val, max_val, _ = spec
+            n = self.binary_grid_params[f"{name}_n"]
+            if self.binary_grid_params[config_name]:
+                return np.geomspace(min_val, max_val, n)
+        return super()._build_param_array(name, spec)
 
     def _fit_grid_point(self, grid_params):
         """
