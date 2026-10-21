@@ -31,6 +31,7 @@ from scipy.signal import find_peaks
 
 from .mulens_object_config import EventConfig, ModelConfig
 
+from .gridsearches import BinaryGridSearch
 
 def get_PSPL_params(
     ef_grid_point,
@@ -2328,6 +2329,100 @@ class WideLowerGridSearchEstimator(
     """
 
     pass
+
+class HighMagGridSearchEstimator(BinaryGridSearch):
+    """
+    Grid-only estimator for high-magnification anomalies.
+
+    Unlike the other binary-lens estimators, this class does not derive
+    ``s``, ``q``, or ``alpha`` from the anomaly geometry.  Those parameters
+    are searched directly by :class:`BinaryGridSearch`; only the PSPL
+    parameters and the source size are optimized at each grid point.
+    """
+
+    def __init__(
+        self,
+        datasets,
+        params,
+        model_config=None,
+        event_config=None,
+        grid_params=None,
+        fitter_kwargs=None,
+        rho=0.001,
+        verbose=False,
+    ):
+        self.params = params
+        self.model_config = model_config or ModelConfig()
+        self.event_config = event_config or EventConfig()
+
+        static_params = {
+            "t_0": params["t_0"],
+            "u_0": params["u_0"],
+            "t_E": params["t_E"],
+            "rho": params.get("rho", rho),
+        }
+        binary_seed = {
+            **static_params,
+            "s": 1.0,
+            "q": 0.01,
+            "alpha": 0.0,
+        }
+        binary_params = BinaryLensParams(binary_seed)
+        binary_params.set_mag_method(params)
+
+        search_fitter_kwargs = {
+            "model_config": self.model_config,
+            "event_config": self.event_config,
+            "mag_methods": binary_params.mag_methods,
+            "mag_methods_parameters": binary_params.mag_methods_parameters,
+            "parameters_to_fit": ["t_0", "u_0", "t_E", "rho"],
+            "anomaly_lc_params": params,
+        }
+        if fitter_kwargs is not None:
+            search_fitter_kwargs.update(fitter_kwargs)
+
+        super().__init__(
+            datasets=datasets,
+            static_params=static_params,
+            grid_params=grid_params,
+            fitter_kwargs=search_fitter_kwargs,
+            verbose=verbose,
+        )
+        self._binary_params = None
+        self._alternate_params = None
+
+    @property
+    def binary_params(self):
+        if self._binary_params is None:
+            raise RuntimeError("run() must be called before binary_params.")
+        return self._binary_params
+
+    @property
+    def alternate_params(self):
+        if self._alternate_params is None:
+            raise RuntimeError("run() must be called before alternate_params.")
+        return self._alternate_params
+
+    def run(self):
+        super().run()
+        row = self.results.loc[self.results["chi2"].idxmin()]
+        fitted_params = row.to_dict()
+        for key in ("s", "q", "alpha", "t_0", "u_0", "t_E", "rho"):
+            fitted_params.setdefault(key, self.static_params.get(key))
+        fitted_params = {
+            key: fitted_params[key]
+            for key in ("t_0", "u_0", "t_E", "s", "q", "alpha", "rho")
+            if fitted_params.get(key) is not None
+        }
+
+        self._binary_params = BinaryLensParams(fitted_params)
+        self._binary_params.set_mag_method(self.params)
+
+        alternate = fitted_params.copy()
+        alternate["s"] = 1.0 / alternate["s"]
+        self._alternate_params = BinaryLensParams(alternate)
+        self._alternate_params.set_mag_method(self.params)
+        return self._binary_params
 
 
 def get_close_params(params, q=None, rho=None):

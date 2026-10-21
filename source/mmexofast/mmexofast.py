@@ -29,6 +29,7 @@ from .estimate_params import (
     CloseAxisGridSearchEstimator,
     CloseLowerGridSearchEstimator,
     CloseUpperGridSearchEstimator,
+    HighMagGridSearchEstimator,
     ParameterEstimator,
     WideAxisGridSearchEstimator,
     WideLowerGridSearchEstimator,
@@ -2420,6 +2421,8 @@ class MMEXOFASTFitter:
             ]
         elif self.intermediate_results.anomaly_type == "dip":
             estimator_classes = [CloseAxisGridSearchEstimator]
+        elif self.intermediate_results.anomaly_type == "high_mag":
+            estimator_classes = [HighMagGridSearchEstimator]
         else:
             logger.info(
                 "Binary params estimate not implemented for %s",
@@ -2502,7 +2505,6 @@ class MMEXOFASTFitter:
         n_data = sum(np.sum(dataset.good) for dataset in self.datasets)
         logger.info(f"PL chi2: {pspl_chi2:.1f}, N_good: {n_data}")
 
-        # TODO: Implement grid search for high-mag models. See gridsearches.BinaryGridSearch()
         # TODO: Separate models (key/param items) into separate steps.
         # TODO: Check for and implement point source binary lens models.
 

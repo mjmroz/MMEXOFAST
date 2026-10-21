@@ -15,8 +15,6 @@ import sfit_minimizer
 from scipy import stats
 from scipy.ndimage import label, minimum_filter
 
-from .fitters import AnomalyFitter, SFitFitter
-
 logger = logging.getLogger(__name__)
 
 
@@ -3239,6 +3237,8 @@ class ParallaxGridSearch(BaseRectGridSearch):
         dict
             Contains 'chi2', 'params', and 'success'.
         """
+        from .fitters import SFitFitter
+
         if self.datasets is None:
             raise ValueError("datasets must be set before running.")
 
@@ -3630,6 +3630,8 @@ class BinaryGridSearch(BaseRectGridSearch):
                 Contains 'chi2', 'params' (best-fit parameters),
                 'success', and any other fitter output
         """
+
+        from .fitters import AnomalyFitter
 
         # Combine static params with this grid point's binary values
         model_params = self.static_params.copy()
