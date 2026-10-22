@@ -1,5 +1,6 @@
 import os.path
 import unittest
+from unittest.mock import Mock, patch
 
 import matplotlib.pyplot as plt
 import MulensModel as mm
@@ -178,6 +179,150 @@ class TestBinaryGridSearch(unittest.TestCase):
         np.testing.assert_allclose(
             sorted(search.results["q"].unique()), [0.01, 0.1]
         )
+
+    def test_progress_bar_is_enabled(self):
+        search = gridsearches.BinaryGridSearch(
+            datasets=[],
+            static_params={},
+            s_min=0.5,
+            s_max=2.0,
+            s_n=2,
+            q_min=0.01,
+            q_max=0.1,
+            q_n=2,
+            alpha_min=0.0,
+            alpha_max=30.0,
+            alpha_step=30.0,
+            progress=True,
+        )
+        search._fit_grid_point = lambda params: {
+            "chi2": sum(params.values()),
+            "params": {},
+            "success": True,
+        }
+
+        with patch(
+            "mmexofast.gridsearches.tqdm", side_effect=lambda x, **_: x
+        ) as progress:
+            search.run()
+
+        progress.assert_called_once()
+        self.assertEqual(progress.call_args.kwargs["total"], 8)
+
+    def test_grid_cell_only_evaluates_chi2(self):
+        model = object()
+        event = Mock()
+        event.get_chi2.return_value = 12.5
+        model_config = Mock()
+        model_config.build.return_value = model
+        event_config = Mock()
+        event_config.build.return_value = event
+        search = gridsearches.BinaryGridSearch(
+            datasets=[],
+            static_params={"t_0": 1.0},
+            s_min=1.0,
+            s_max=1.0,
+            s_n=1,
+            q_min=0.1,
+            q_max=0.1,
+            q_n=1,
+            alpha_min=0.0,
+            alpha_max=0.0,
+            alpha_step=1.0,
+            fitter_kwargs={
+                "model_config": model_config,
+                "event_config": event_config,
+            },
+        )
+
+        result = search._fit_grid_point(
+            {"s": 1.0, "q": 0.1, "alpha": 0.0}
+        )
+
+        self.assertEqual(result["chi2"], 12.5)
+        model_config.build.assert_called_once()
+        event_config.build.assert_called_once_with(
+            model=model, datasets=[]
+        )
+        event.get_chi2.assert_called_once_with()
+
+    def test_grid_cell_can_use_sfit(self):
+        fitter = Mock()
+        fitter.best = {"t_0": 1.1, "chi2": 3.5}
+        fitter.results.success = True
+        with patch(
+            "mmexofast.fitters.SFitFitter", return_value=fitter
+        ) as sfit:
+            search = gridsearches.BinaryGridSearch(
+                datasets=[],
+                static_params={"t_0": 1.0},
+                fitter_kwargs={"mag_methods": "point_source_point_lens"},
+                fit_method="sfit",
+            )
+            result = search._fit_grid_point(
+                {"s": 1.0, "q": 0.1, "alpha": 0.0}
+            )
+
+        self.assertEqual(result["chi2"], 3.5)
+        sfit.assert_called_once()
+        self.assertEqual(
+            sfit.call_args.kwargs["parameters_to_fit"], ["s", "q", "alpha"]
+        )
+        fitter.run.assert_called_once_with()
+
+    def test_grid_cell_preserves_custom_parameters_to_fit(self):
+        fitter = Mock()
+        fitter.best = {"t_0": 1.1, "chi2": 3.5}
+        fitter.results.success = True
+        with patch(
+            "mmexofast.fitters.SFitFitter", return_value=fitter
+        ) as sfit:
+            search = gridsearches.BinaryGridSearch(
+                datasets=[],
+                static_params={"t_0": 1.0},
+                fitter_kwargs={
+                    "mag_methods": "point_source_point_lens",
+                    "parameters_to_fit": ["t_0", "u_0", "t_E", "rho"],
+                },
+                fit_method="sfit",
+            )
+            search._fit_grid_point({"s": 1.0, "q": 0.1, "alpha": 0.0})
+
+        self.assertEqual(
+            sfit.call_args.kwargs["parameters_to_fit"],
+            ["t_0", "u_0", "t_E", "rho"],
+        )
+
+    def test_invalid_fit_method(self):
+        with self.assertRaises(ValueError):
+            gridsearches.BinaryGridSearch(
+                datasets=[], static_params={}, fit_method="invalid"
+            )
+
+    def test_results_include_failed_cells_without_fitted_params(self):
+        search = gridsearches.BinaryGridSearch(
+            datasets=[],
+            static_params={},
+            s_min=1.0,
+            s_max=1.0,
+            s_n=1,
+            q_min=0.1,
+            q_max=0.1,
+            q_n=1,
+            alpha_min=0.0,
+            alpha_max=0.0,
+            alpha_step=1.0,
+        )
+        search._fit_grid_point = lambda params: {
+            "chi2": np.nan,
+            "params": None,
+            "success": False,
+        }
+
+        search.run()
+
+        self.assertFalse(search.results.loc[0, "success"])
+        self.assertEqual(search.results.loc[0, "s"], 1.0)
 
 
 class TestEFSFitFunction(unittest.TestCase):

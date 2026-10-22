@@ -29,9 +29,9 @@ from matplotlib.gridspec import GridSpec
 from scipy.optimize import minimize
 from scipy.signal import find_peaks
 
+from .gridsearches import BinaryGridSearch
 from .mulens_object_config import EventConfig, ModelConfig
 
-from .gridsearches import BinaryGridSearch
 
 def get_PSPL_params(
     ef_grid_point,
@@ -2335,9 +2335,11 @@ class HighMagGridSearchEstimator(BinaryGridSearch):
     Grid-only estimator for high-magnification anomalies.
 
     Unlike the other binary-lens estimators, this class does not derive
-    ``s``, ``q``, or ``alpha`` from the anomaly geometry.  Those parameters
-    are searched directly by :class:`BinaryGridSearch`; only the PSPL
-    parameters and the source size are optimized at each grid point.
+    ``s``, ``q``, or ``alpha`` from the anomaly geometry. Those parameters
+    are searched directly by :class:`BinaryGridSearch`. With the default
+    ``fit_method="EmceeLCFitter"``, ``s``, ``q``, and ``alpha`` are sampled
+    at each grid point while the remaining parameters stay fixed. The grid
+    values are compared across grid points.
     """
 
     def __init__(
@@ -2350,6 +2352,7 @@ class HighMagGridSearchEstimator(BinaryGridSearch):
         fitter_kwargs=None,
         rho=0.001,
         verbose=False,
+        fit_method="chi2",
     ):
         self.params = params
         self.model_config = model_config or ModelConfig()
@@ -2375,8 +2378,7 @@ class HighMagGridSearchEstimator(BinaryGridSearch):
             "event_config": self.event_config,
             "mag_methods": binary_params.mag_methods,
             "mag_methods_parameters": binary_params.mag_methods_parameters,
-            "parameters_to_fit": ["t_0", "u_0", "t_E", "rho"],
-            "anomaly_lc_params": params,
+            "parameters_to_fit": ["s", "q", "alpha"],
         }
         if fitter_kwargs is not None:
             search_fitter_kwargs.update(fitter_kwargs)
@@ -2387,6 +2389,7 @@ class HighMagGridSearchEstimator(BinaryGridSearch):
             grid_params=grid_params,
             fitter_kwargs=search_fitter_kwargs,
             verbose=verbose,
+            fit_method=fit_method,
         )
         self._binary_params = None
         self._alternate_params = None
@@ -2404,8 +2407,22 @@ class HighMagGridSearchEstimator(BinaryGridSearch):
         return self._alternate_params
 
     def run(self):
-        super().run()
-        row = self.results.loc[self.results["chi2"].idxmin()]
+        super().run(progress=True, refine=True)
+        results = self.results
+        print(f"Grid search results: {results}")
+        finite_chi2 = np.isfinite(results["chi2"])
+        if not finite_chi2.any():
+            errors = (
+                results.loc[:, "error"].dropna().unique().tolist()
+                if "error" in results
+                else []
+            )
+            detail = f" Errors: {errors}" if errors else ""
+            raise RuntimeError(
+                "High-magnification binary-lens grid search produced no "
+                f"finite chi2 values.{detail}"
+            )
+        row = results.loc[results.loc[finite_chi2, "chi2"].idxmin()]
         fitted_params = row.to_dict()
         for key in ("s", "q", "alpha", "t_0", "u_0", "t_E", "rho"):
             fitted_params.setdefault(key, self.static_params.get(key))
@@ -2414,6 +2431,7 @@ class HighMagGridSearchEstimator(BinaryGridSearch):
             for key in ("t_0", "u_0", "t_E", "s", "q", "alpha", "rho")
             if fitted_params.get(key) is not None
         }
+        print(f"Best-fit high mag binary lens parameters: {fitted_params}")
 
         self._binary_params = BinaryLensParams(fitted_params)
         self._binary_params.set_mag_method(self.params)

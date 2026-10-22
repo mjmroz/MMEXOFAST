@@ -14,6 +14,7 @@ import pandas as pd
 import sfit_minimizer
 from scipy import stats
 from scipy.ndimage import label, minimum_filter
+from tqdm.auto import tqdm
 
 logger = logging.getLogger(__name__)
 
@@ -749,6 +750,9 @@ class BaseRectGridSearch(ABC):
         Maximum edge expansion iterations. Default 5.
     verbose : bool
         Print progress. Default False.
+    progress : bool
+        Display a tqdm progress bar while evaluating grid points. Default
+        False.
     """
 
     # TODO: This should be updated to use model_config/event_config to replace fitter_kwargs in the child classes.
@@ -763,6 +767,7 @@ class BaseRectGridSearch(ABC):
         max_refinements=5,
         max_expansions=5,
         verbose=False,
+        progress=False,
     ):
         self.grid_params = grid_params
         self.datasets = datasets
@@ -773,6 +778,7 @@ class BaseRectGridSearch(ABC):
         self.max_refinements = max_refinements
         self.max_expansions = max_expansions
         self.verbose = verbose
+        self.progress = progress
 
         self.results_history = None
         self.minima = None
@@ -1183,7 +1189,13 @@ class BaseRectGridSearch(ABC):
         last_indices = None
         last_result = None
 
-        for i, indices in enumerate(ordered_indices):
+        points = tqdm(
+            ordered_indices,
+            total=n_total,
+            desc=f"{self.__class__.__name__} grid",
+            disable=not self.progress,
+        )
+        for i, indices in enumerate(points):
             if result_grid[indices] is not None:
                 continue
 
@@ -1249,6 +1261,7 @@ class BaseRectGridSearch(ABC):
         use_nearest_neighbor_init=None,
         max_refinements=None,
         max_expansions=None,
+        progress=None,
     ):
         """Execute grid search.
 
@@ -1269,6 +1282,9 @@ class BaseRectGridSearch(ABC):
             Overrides instance default.
         max_expansions : int or None
             Overrides instance default.
+        progress : bool or None
+            Display a tqdm progress bar while evaluating grid points.
+            Overrides the instance default.
         """
         if self.grid_params is None:
             raise ValueError("grid_params must be set before running.")
@@ -1283,6 +1299,8 @@ class BaseRectGridSearch(ABC):
         pt_dens = point_density_in_minimum or self.point_density_in_minimum
         max_ref = max_refinements or self.max_refinements
         max_exp = max_expansions or self.max_expansions
+        if progress is not None:
+            self.progress = progress
 
         self._point_cache = {}
         self._run_coarse_grid(order, start, nn_init)
@@ -2708,7 +2726,11 @@ class BaseRectGridSearch(ABC):
                     indices[param_names.index(name)]
                 ]
             row["success"] = result.get("success", False)
-            row.update(result.get("params", {}))
+            if result.get("error") is not None:
+                row["error"] = result["error"]
+            fitted_params = result.get("params")
+            if fitted_params is not None:
+                row.update(fitted_params)
             rows.append(row)
 
         if not rows:
@@ -3466,8 +3488,8 @@ class BinaryGridSearch(BaseRectGridSearch):
     Grid search over binary lens parameters s (separation), q (mass ratio),
     and alpha (source trajectory angle).
 
-    For each grid point, runs mmexofast.fitters.SFitFitter with fixed binary
-    parameters and returns chi2 + fit results.
+    For each grid point, either evaluates chi2 directly or runs
+    ``EmceeLCFitter`` with the binary parameters sampled.
     """
 
     def __init__(
@@ -3488,6 +3510,8 @@ class BinaryGridSearch(BaseRectGridSearch):
         alpha_step=30.0,
         fitter_kwargs=None,
         verbose=False,
+        progress=False,
+        fit_method="EmceeLCFitter",
     ):
         """
         Parameters:
@@ -3524,11 +3548,31 @@ class BinaryGridSearch(BaseRectGridSearch):
                 Step size for alpha (degrees). Alpha always uses linear spacing.
                 Ignored if grid_params provided.
             fitter_kwargs: *dict* or None
-                Additional keyword arguments to pass to SFitFitter
+                Additional keyword arguments passed to ``EmceeLCFitter``.
+                ``parameters_to_fit`` defaults to ``["s", "q", "alpha"]``.
+                Supplying this key overrides that default; all other model
+                parameters remain fixed at their values in ``static_params``.
             verbose: *bool*
                 If True, print progress information
-        """
-        super().__init__(datasets=datasets, verbose=verbose)
+            progress: *bool*
+                If True, display a tqdm progress bar while evaluating grid
+                points.
+            fit_method: *str*
+                How to evaluate each grid point. ``"chi2"`` evaluates the
+                model directly without fitting. ``"EmceeLCFitter"`` runs
+                ``EmceeLCFitter`` with ``parameters_to_fit`` from
+                ``fitter_kwargs``; if it is not supplied, only ``s``, ``q``,
+                and ``alpha`` are fitted and every parameter in
+                ``static_params`` remains fixed.
+                """
+
+        if fit_method not in {"chi2",  "EmceeLCFitter"}:
+            raise ValueError(
+                "fit_method must be 'chi2', 'EmceeLCFitter'."
+            )
+        super().__init__(
+            datasets=datasets, verbose=verbose, progress=progress
+        )
 
         self.static_params = static_params.copy()
 
@@ -3599,6 +3643,7 @@ class BinaryGridSearch(BaseRectGridSearch):
             ],
         }
         self.fitter_kwargs = fitter_kwargs if fitter_kwargs is not None else {}
+        self.fit_method = fit_method
 
     @staticmethod
     def _grid_step(min_val, max_val, n):
@@ -3619,7 +3664,7 @@ class BinaryGridSearch(BaseRectGridSearch):
 
     def _fit_grid_point(self, grid_params):
         """
-        Run SFitFitter for one grid point.
+        Evaluate chi2 for one grid point without fitting.
 
         Parameters:
             grid_params: *dict*
@@ -3631,34 +3676,93 @@ class BinaryGridSearch(BaseRectGridSearch):
                 'success', and any other fitter output
         """
 
-        from .fitters import AnomalyFitter
-
         # Combine static params with this grid point's binary values
         model_params = self.static_params.copy()
         model_params["s"] = grid_params["s"]
         model_params["q"] = grid_params["q"]
         model_params["alpha"] = grid_params["alpha"]
-
-        # Run fitter
+        print(f"Evaluating grid point: s={model_params['s']}, q={model_params['q']}, alpha={model_params['alpha']}")
         try:
-            fitter = AnomalyFitter(
-                initial_guess=model_params,
-                datasets=self.datasets,
-                **self.fitter_kwargs,
-            )
-            fitter.run()
+            fitter_kwargs = self.fitter_kwargs
+            if self.fit_method == "EmceeLCFitter":
+                from .fitters import EmceeLCFitter
 
-            result = {
-                "chi2": fitter.chi2,
-                "params": fitter.best_fit_params,
-                "success": fitter.converged
-                if hasattr(fitter, "success")
-                else True,
+                fitter_kwargs = fitter_kwargs.copy()
+                print(f"Using EmceeLCFitter with fitter_kwargs: {fitter_kwargs}")
+                emcee_settings = {
+                    "n_walkers": 10,
+                    "n_burn": 500,
+                    "n_steps": 1000,
+                    "acceptance_fraction": 0.1,
+                }
+                fitter_kwargs.setdefault("initial_guess", model_params)
+                fitter_kwargs.setdefault(
+                    "parameters_to_fit", ["s", "q", "alpha"]
+                )
+                if "sigmas" not in fitter_kwargs:
+                    fitter_kwargs["sigmas"] = {
+                        parameter: max(
+                            abs(
+                                model_params[
+                                    parameter[4:]
+                                    if parameter.startswith("log_")
+                                    else parameter
+                                ]
+                            )
+                            * 1e-3,
+                            1e-6,
+                        )
+                        for parameter in fitter_kwargs["parameters_to_fit"]
+                    }
+
+                fitter = EmceeLCFitter(
+                    initial_model_params=model_params,
+                    datasets=self.datasets,
+                    emcee_settings=emcee_settings,
+                    **fitter_kwargs,
+                )
+                run_error = fitter.run()
+                if run_error is not None or fitter.best is None:
+                    return {
+                        "chi2": np.nan,
+                        "params": None,
+                        "success": False,
+                        "error": run_error
+                        or "EmceeLCFitter returned no best-fit parameters.",
+                    }
+                return {
+                    "chi2": fitter.best["chi2"],
+                    "params": {
+                        key: value
+                        for key, value in fitter.best.items()
+                        if key != "chi2"
+                    },
+                    "success": fitter.success,
+                }
+
+            from .mulens_object_config import EventConfig, ModelConfig
+
+            model_config = fitter_kwargs.get("model_config", ModelConfig())
+            event_config = fitter_kwargs.get("event_config", EventConfig())
+            print(f"Building model with parameters: {model_params} and fitter_kwargs: {fitter_kwargs}, event_config: {event_config}, model_config: {model_config}")
+            model = model_config.build(
+                parameters=model_params,
+                magnification_methods=fitter_kwargs.get("mag_methods"),
+                magnification_methods_parameters=fitter_kwargs.get(
+                    "mag_methods_parameters"
+                ),
+            )
+            event = event_config.build(model=model, datasets=self.datasets)
+            print(f"Evaluating chi2 {event.get_chi2()}")
+            return {
+                "chi2": event.get_chi2(),
+                "params": model_params,
+                "success": True,
             }
 
         except Exception as e:
             if self.verbose:
-                print(f"  Fit failed: {e}")
+                print(f"  Chi2 calculation failed: {e}")
             result = {
                 "chi2": np.nan,
                 "params": None,
