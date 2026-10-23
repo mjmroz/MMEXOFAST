@@ -3651,9 +3651,13 @@ class BinaryGridSearch(BaseRectGridSearch):
                 ``fitter_kwargs``; if it is not supplied, only ``s``, ``q``,
                 and ``alpha`` are fitted and every parameter in
                 ``static_params`` remains fixed.
+                ``"LSFitter"`` runs ``LSFitter`` with ``parameters_to_fit`` from
+                ``fitter_kwargs``; if it is not supplied, only ``s``, ``q``,
+                and ``alpha`` are fitted and every parameter in
+                ``static_params`` remains fixed.
                 """
 
-        if fit_method not in {"chi2",  "EmceeLCFitter"}:
+        if fit_method not in {"chi2",  "EmceeLCFitter", "LSFitter"}:
             raise ValueError(
                 "fit_method must be 'chi2', 'EmceeLCFitter'."
             )
@@ -3752,6 +3756,28 @@ class BinaryGridSearch(BaseRectGridSearch):
                 return np.geomspace(min_val, max_val, n)
         return super()._build_param_array(name, spec)
 
+    def _get_bounds(self, grid_params):
+        """Return bounds for the fitter based on the grid point.
+
+        Parameters:
+            grid_params: *dict*
+                Contains 's', 'q', and 'alpha' for this grid point
+        """
+        bounds = {}
+        param_arrays = self._build_all_param_arrays()
+        for param in self.fitter_kwargs.get("parameters_to_fit", []):
+            if param not in param_arrays:
+                continue
+            value = grid_params[param]
+            param_array = param_arrays[param]
+            index = self._value_to_index(value, param_array)
+            bounds[param] = self._indices_to_param_range(
+                max(0, index - 1),
+                min(len(param_array) - 1, index + 1),
+                param_array,
+            )
+        return bounds
+
     def _fit_grid_point(self, grid_params):
         """
         Evaluate chi2 for one grid point without fitting.
@@ -3820,6 +3846,38 @@ class BinaryGridSearch(BaseRectGridSearch):
                         "error": run_error
                         or "EmceeLCFitter returned no best-fit parameters.",
                     }
+                return {
+                    "chi2": fitter.best["chi2"],
+                    "params": {
+                        key: value
+                        for key, value in fitter.best.items()
+                        if key != "chi2"
+                    },
+                    "success": fitter.success,
+                }
+            elif self.fit_method == "LSFitter":
+                from .fitters import LSFitter
+
+                fitter_kwargs = fitter_kwargs.copy()
+                fitter_kwargs["initial_guess"] = model_params
+                fitter = LSFitter(
+                    initial_model_params=model_params,
+                    datasets=self.datasets,
+                    bounds=self._get_bounds(grid_params),
+                    **fitter_kwargs,
+                )
+                fit_result = fitter.run()
+                if fitter.best is None or not fit_result.success:
+                    return {
+                        "chi2": np.nan,
+                        "params": None,
+                        "success": False,
+                        "error": (
+                            getattr(fit_result, "message", None)
+                            or "LSFitter returned no best-fit parameters."
+                        ),
+                    }
+                print(f"LSFitter best-fit parameters: {fitter.best}")
                 return {
                     "chi2": fitter.best["chi2"],
                     "params": {

@@ -209,6 +209,29 @@ class TestBinaryGridSearch(unittest.TestCase):
         progress.assert_called_once()
         self.assertEqual(progress.call_args.kwargs["total"], 8)
 
+    def test_lsfitter_bounds_use_numeric_neighboring_grid_values(self):
+        search = gridsearches.BinaryGridSearch(
+            datasets=[],
+            static_params={"t_0": 1.0},
+            s_min=0.5,
+            s_max=2.0,
+            s_n=3,
+            q_min=0.001,
+            q_max=1.0,
+            q_n=3,
+            alpha_min=0.0,
+            alpha_max=360.0,
+            alpha_step=30.0,
+            fitter_kwargs={"parameters_to_fit": ["s", "q", "alpha"]},
+            fit_method="LSFitter",
+        )
+
+        bounds = search._get_bounds({"s": 0.5, "q": 0.001, "alpha": 360.0})
+
+        np.testing.assert_allclose(bounds["s"], (0.5, 1.0))
+        np.testing.assert_allclose(bounds["q"], (0.001, 0.03162277660168379))
+        np.testing.assert_allclose(bounds["alpha"], (330.0, 360.0))
+
     def test_grid_cell_only_evaluates_chi2(self):
         model = object()
         event = Mock()
@@ -245,6 +268,46 @@ class TestBinaryGridSearch(unittest.TestCase):
             model=model, datasets=[]
         )
         event.get_chi2.assert_called_once_with()
+
+    def test_grid_cell_lsfitter_sets_initial_guess_and_uses_result(self):
+        fitter = Mock()
+        fitter.best = {"t_0": 1.1, "s": 1.0, "q": 0.1, "alpha": 0.0, "chi2": 3.5}
+        fitter.run.return_value.success = True
+
+        with patch("mmexofast.fitters.LSFitter", return_value=fitter) as lsf:
+            search = gridsearches.BinaryGridSearch(
+                datasets=[],
+                static_params={"t_0": 1.0, "u_0": 0.1, "t_E": 10.0},
+                s_min=1.0,
+                s_max=1.0,
+                s_n=1,
+                q_min=0.1,
+                q_max=0.1,
+                q_n=1,
+                alpha_min=0.0,
+                alpha_max=0.0,
+                alpha_step=1.0,
+                fitter_kwargs={"parameters_to_fit": ["s", "q", "alpha"]},
+                fit_method="LSFitter",
+            )
+            result = search._fit_grid_point(
+                {"s": 1.0, "q": 0.1, "alpha": 0.0}
+            )
+
+        self.assertEqual(result["chi2"], 3.5)
+        lsf.assert_called_once()
+        self.assertEqual(
+            lsf.call_args.kwargs["initial_guess"],
+            {
+                "t_0": 1.0,
+                "u_0": 0.1,
+                "t_E": 10.0,
+                "s": 1.0,
+                "q": 0.1,
+                "alpha": 0.0,
+            },
+        )
+        fitter.run.assert_called_once_with()
 
     def test_grid_cell_can_use_sfit(self):
         fitter = Mock()

@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 import MulensModel
 import numpy as np
 import sfit_minimizer as sfit
-from scipy.optimize import curve_fit
+from scipy.optimize import curve_fit, minimize
 
 from .estimate_params import WideAxisEnsembleInitializer
 from .mulens_object_config import EventConfig, ModelConfig
@@ -1147,6 +1147,93 @@ class EmceeLCFitter(MulensFitter):
             parameters_to_fit=self.parameters_to_fit,
         )
 
+class LSFitter(EmceeLCFitter):
+    """
+    Fit a microlensing light curve using the Levenberg-Marquardt algorithm.
+
+    Extends :class:`EmceeLCFitter` with a :meth:`run` method that uses
+    ``scipy.optimize.minimize()`` to fit the model to the data.  The
+    starting point is taken from :attr:`initial_guess`, and the fitted
+    parameters are stored in :attr:`best` along with the corresponding
+    ``'chi2'``.
+
+    All other parameters (``datasets``, ``sigmas``, ``model_config``,
+    ``event_config``, ``pool``, …) are inherited from :class:`EmceeLCFitter`
+    and :class:`MulensFitter`.
+    """
+    def __init__(self, bounds=None, **kwargs):
+        super().__init__(**kwargs)
+        self.bounds = bounds
+        self.parse_bounds()
+
+    def parse_bounds(self):
+        """
+        Parse the bounds provided by the user and set default bounds for parameters.
+
+        If no bounds are provided, default bounds are set for each parameter.
+        """
+        if isinstance(self.bounds, dict):
+            lower_bounds = []
+            upper_bounds = []
+            for param in self.parameters_to_fit:
+                if param in self.bounds:
+                    lower_bounds.append(self.bounds[param][0])
+                    upper_bounds.append(self.bounds[param][1])
+                else:
+                    # Set default bounds if not provided
+                    lower_bounds.append(-np.inf)
+                    upper_bounds.append(np.inf)
+            self.bounds = (lower_bounds, upper_bounds)
+
+        if not isinstance(self.bounds, tuple) or len(self.bounds) != 2:
+            raise ValueError("Bounds must be a tuple of two lists (lower_bounds, upper_bounds).")
+        if len(self.bounds[0]) != len(self.parameters_to_fit) or len(self.bounds[1]) != len(self.parameters_to_fit):
+            raise ValueError("Bounds must have the same length as parameters_to_fit.")
+
+    def run(self, verbose=False):
+        """
+        Fit the model using the scipy.optimize.minimize algorithm.
+
+        The negative log probability is minimized, starting from
+        :attr:`initial_guess`. The fitted parameters are stored
+        in :attr:`best` along with the corresponding ``'chi2'``.
+
+        Parameters
+        ----------
+        verbose : bool, optional
+            If ``True``, prints the optimization result summary. Default is
+            ``False``.
+        """
+        if self._event is None:
+            self.initialize_event()
+
+        initial_vector = self.make_emcee_vector_from_ModelParameters(
+            self._event.model.parameters
+        )
+        print(f"initial vector: {initial_vector}")
+        result = minimize(
+            lambda theta: -self.ln_prob(theta),
+            x0=initial_vector,
+            method="L-BFGS-B",
+            bounds=list(zip(*self.bounds)),
+            options={
+                "maxiter": 100,
+                "ftol": 1e-4,
+            })
+        self.best_theta = np.asarray(result.x)
+        self.event = self.best_theta
+
+        self.best = self._event.model.parameters.parameters
+        self.best["chi2"] = self._event.get_chi2()
+        self.results = dict(
+            best=self.best,
+            chi2=self.best["chi2"],
+            parameters_to_fit=self.parameters_to_fit,
+        )
+        print(f"Best-fit parameters: {self.results['best']}")
+
+        return result
+
 
 class AnomalyFitter(EmceeLCFitter):
     """
@@ -1218,6 +1305,7 @@ class AnomalyFitter(EmceeLCFitter):
     :class:`AnomalyFitterEnsembleInitialization`) should pass
     ``initial_guess=None`` to suppress automatic sigma computation, handling
     it themselves once ``initial_guess`` is available.
+p_tru = [230, -0.4, 2.0, 0.1]
 
     All other parameters (``datasets``, ``sigmas``, ``model_config``,
     ``event_config``, ``pool``, …) are inherited from :class:`EmceeLCFitter`
@@ -1707,6 +1795,7 @@ class BellTemplateFitter:
         ):
             if not (low <= param <= high):
                 raise ValueError(
+
                     f"Initial guess for anomaly classifier parameter {self._fit_parameters[i]} ({param}) is out of bounds ({low}, {high})."
                 )
 
