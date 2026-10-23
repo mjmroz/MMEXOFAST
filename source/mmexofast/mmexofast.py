@@ -407,6 +407,11 @@ class MMEXOFASTFitter:
         if e.g.``u_0<0.001`` then FSPL is only run if the fitted u_0 from PSPL model is less than 0.001.
     source_type : str
         ``'dwarf'`` or ``'giant'``. Default is ``'giant'``.  Used to set a initial value of rho for FSPL fitting.
+    grid_n_jobs : int
+        Number of worker processes for grid searches. ``1`` (default) runs
+        serially; ``-1`` uses all available CPUs. Rectangular grid searches
+        require nearest-neighbor initialization to be disabled when using
+        more than one worker.
     mag_methods : list, optional
         Magnification methods in MulensModel convention.
     vbbl_accuracy : float, optional
@@ -538,6 +543,7 @@ class MMEXOFASTFitter:
         "renormalize_errors",
         "no_parallax",
         "parallax_grid",
+        "grid_n_jobs",
         "primary_location",
         "primary_dataset",
         "emcee_settings",
@@ -583,6 +589,7 @@ class MMEXOFASTFitter:
         renormalize_errors: bool = True,  # TODO: ADD option for remove_outliers=True/False
         no_parallax: bool = False,
         parallax_grid: bool = False,
+        grid_n_jobs: int = 1,
         primary_location=None,
         primary_dataset=None,
         emcee_settings=None,
@@ -1458,7 +1465,9 @@ class MMEXOFASTFitter:
         Stores the best grid point in
         ``self.intermediate_results.best_ef_grid_point``.
         """
-        ef_grid = EventFinderGridSearch(datasets=self.datasets)
+        ef_grid = EventFinderGridSearch(
+            datasets=self.datasets, n_jobs=self.grid_n_jobs
+        )
         ef_grid.run()
 
         if self._output_config is not None and self._output_config.save_plots:
@@ -2304,7 +2313,9 @@ class MMEXOFASTFitter:
         Stores the best grid point in
         ``self.intermediate_results.best_af_grid_point``.
         """
-        af_grid = AnomalyFinderGridSearch(residuals=self.residuals)
+        af_grid = AnomalyFinderGridSearch(
+            residuals=self.residuals, n_jobs=self.grid_n_jobs
+        )
         af_grid.run()
         if self._output_config is not None and self._output_config.save_plots:
             fig = af_grid.plot()
@@ -2637,6 +2648,7 @@ class MMEXOFASTFitter:
                 fitter_kwargs=self._get_fitter_kwargs(source_type=source_type),
                 skip_optimization=False,
                 verbose=False,
+                n_jobs=self.grid_n_jobs,
             )
             grid.run(refine=True)
             grids[par_branch] = grid

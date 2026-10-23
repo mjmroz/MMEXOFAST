@@ -1,6 +1,7 @@
 import json
 import logging
 import math
+import multiprocessing
 import warnings
 from abc import ABC, abstractmethod
 from collections import deque
@@ -17,6 +18,29 @@ from scipy.ndimage import label, minimum_filter
 from tqdm.auto import tqdm
 
 logger = logging.getLogger(__name__)
+
+
+def _normalise_n_jobs(n_jobs):
+    """Return a validated worker count, with -1 meaning all CPUs."""
+    if n_jobs is None:
+        return 1
+    if not isinstance(n_jobs, int) or isinstance(n_jobs, bool):
+        raise TypeError("n_jobs must be an integer or None.")
+    if n_jobs == -1:
+        return multiprocessing.cpu_count()
+    if n_jobs < 1:
+        raise ValueError("n_jobs must be positive or -1.")
+    return n_jobs
+
+
+def _event_finder_grid_point(args):
+    search, t_0, t_eff, verbose = args
+    return search.do_fits({"t_0": t_0, "t_eff": t_eff}, verbose=verbose)
+
+
+def _rect_grid_point(args):
+    search, point = args
+    return search._fit_grid_point(point)
 
 
 class NoAnomalyFoundError(ValueError):
@@ -54,6 +78,7 @@ class EventFinderGridSearch:
         t_0_max=None,
         z_t_eff=5,
         n_min=50,
+        n_jobs=1,
     ):
         if datasets is None:
             raise ValueError("You must define the datasets!")
@@ -89,6 +114,7 @@ class EventFinderGridSearch:
         # parameters for trimming data
         self.z_t_eff = z_t_eff
         self.n_min = n_min
+        self.n_jobs = _normalise_n_jobs(n_jobs)
 
     # ---------------------------------------------------------------------
     # Setup functions:
@@ -138,8 +164,25 @@ class EventFinderGridSearch:
 
     def run(self, verbose=False):
         results = []
-        for t_0, t_eff in zip(self.grid_t_0, self.grid_t_eff):
-            chi2s = self.do_fits({"t_0": t_0, "t_eff": t_eff}, verbose=verbose)
+        grid_points = zip(self.grid_t_0, self.grid_t_eff)
+        if self.n_jobs > 1:
+            with multiprocessing.Pool(self.n_jobs) as pool:
+                chi2_results = pool.map(
+                    _event_finder_grid_point,
+                    [
+                        (self, t_0, t_eff, verbose)
+                        for t_0, t_eff in grid_points
+                    ],
+                )
+        else:
+            chi2_results = (
+                self.do_fits({"t_0": t_0, "t_eff": t_eff}, verbose=verbose)
+                for t_0, t_eff in grid_points
+            )
+
+        for t_0, t_eff, chi2s in zip(
+            self.grid_t_0, self.grid_t_eff, chi2_results
+        ):
             dchi2s = [chi2s["1"] - chi2s["flat"], chi2s["2"] - chi2s["flat"]]
             if verbose:
                 print("t_0, t_eff, chi2s:", t_0, t_eff, chi2s)
@@ -753,6 +796,10 @@ class BaseRectGridSearch(ABC):
     progress : bool
         Display a tqdm progress bar while evaluating grid points. Default
         False.
+    n_jobs : int
+        Number of worker processes. ``1`` runs serially; ``-1`` uses all
+        available CPUs.         Parallel rectangular searches disable nearest-neighbor initialization
+        because it is evaluation-order dependent.
     """
 
     # TODO: This should be updated to use model_config/event_config to replace fitter_kwargs in the child classes.
@@ -768,6 +815,7 @@ class BaseRectGridSearch(ABC):
         max_expansions=5,
         verbose=False,
         progress=False,
+        n_jobs=1,
     ):
         self.grid_params = grid_params
         self.datasets = datasets
@@ -779,6 +827,7 @@ class BaseRectGridSearch(ABC):
         self.max_expansions = max_expansions
         self.verbose = verbose
         self.progress = progress
+        self.n_jobs = _normalise_n_jobs(n_jobs)
 
         self.results_history = None
         self.minima = None
@@ -1189,6 +1238,37 @@ class BaseRectGridSearch(ABC):
         last_indices = None
         last_result = None
 
+        if self.n_jobs > 1:
+            if use_nn_init:
+                logger.info(
+                    "Disabling nearest-neighbor initialization for parallel "
+                    "grid evaluation."
+                )
+            points = (
+                self._indices_to_point(indices, metadata)
+                for indices in ordered_indices
+                if result_grid[indices] is None
+            )
+            with multiprocessing.Pool(self.n_jobs) as pool:
+                parallel_results = pool.map(
+                    _rect_grid_point,
+                    [(self, point) for point in points],
+                )
+            result_index = 0
+            for indices in ordered_indices:
+                if result_grid[indices] is not None:
+                    continue
+                result = parallel_results[result_index]
+                result_index += 1
+                chi2_grid[indices] = result.get("chi2", np.nan)
+                result_grid[indices] = result
+                key = self._make_cache_key(
+                    self._indices_to_point(indices, metadata),
+                    metadata["param_names"],
+                )
+                self._point_cache[key] = result
+            return
+
         points = tqdm(
             ordered_indices,
             total=n_total,
@@ -1262,6 +1342,7 @@ class BaseRectGridSearch(ABC):
         max_refinements=None,
         max_expansions=None,
         progress=None,
+        n_jobs=None,
     ):
         """Execute grid search.
 
@@ -1285,6 +1366,9 @@ class BaseRectGridSearch(ABC):
         progress : bool or None
             Display a tqdm progress bar while evaluating grid points.
             Overrides the instance default.
+        n_jobs : int or None
+            Number of worker processes for this run. ``1`` runs serially and
+            ``-1`` uses all available CPUs. Overrides the instance default.
         """
         if self.grid_params is None:
             raise ValueError("grid_params must be set before running.")
@@ -1301,6 +1385,8 @@ class BaseRectGridSearch(ABC):
         max_exp = max_expansions or self.max_expansions
         if progress is not None:
             self.progress = progress
+        if n_jobs is not None:
+            self.n_jobs = _normalise_n_jobs(n_jobs)
 
         self._point_cache = {}
         self._run_coarse_grid(order, start, nn_init)
@@ -3512,6 +3598,7 @@ class BinaryGridSearch(BaseRectGridSearch):
         verbose=False,
         progress=False,
         fit_method="EmceeLCFitter",
+        n_jobs=1,
     ):
         """
         Parameters:
@@ -3571,7 +3658,10 @@ class BinaryGridSearch(BaseRectGridSearch):
                 "fit_method must be 'chi2', 'EmceeLCFitter'."
             )
         super().__init__(
-            datasets=datasets, verbose=verbose, progress=progress
+            datasets=datasets,
+            verbose=verbose,
+            progress=progress,
+            n_jobs=n_jobs,
         )
 
         self.static_params = static_params.copy()
