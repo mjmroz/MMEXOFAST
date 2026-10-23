@@ -2352,7 +2352,7 @@ class HighMagGridSearchEstimator(BinaryGridSearch):
         fitter_kwargs=None,
         rho=0.001,
         verbose=False,
-        fit_method="chi2",
+        fit_method="EmceeLCFitter",
     ):
         self.params = params
         self.model_config = model_config or ModelConfig()

@@ -3781,8 +3781,8 @@ class BinaryGridSearch(BaseRectGridSearch):
                 print(f"Using EmceeLCFitter with fitter_kwargs: {fitter_kwargs}")
                 emcee_settings = {
                     "n_walkers": 10,
-                    "n_burn": 500,
-                    "n_steps": 1000,
+                    "n_burn": 100,
+                    "n_steps": 300,
                     "acceptance_fraction": 0.1,
                 }
                 fitter_kwargs.setdefault("initial_guess", model_params)
