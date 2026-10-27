@@ -33,6 +33,17 @@ def _normalise_n_jobs(n_jobs):
     return n_jobs
 
 
+def _resolve_n_jobs(n_jobs=None, n_grid_jobs=None, *, caller_name="grid search"):
+    """Resolve the public n_jobs / n_grid_jobs aliases to the canonical value."""
+    if n_grid_jobs is not None:
+        if n_jobs is not None and n_jobs != n_grid_jobs:
+            raise ValueError(
+                f"Specify only one of n_jobs or n_grid_jobs for {caller_name}."
+            )
+        n_jobs = n_grid_jobs
+    return _normalise_n_jobs(n_jobs)
+
+
 def _event_finder_grid_point(args):
     search, t_0, t_eff, verbose = args
     return search.do_fits({"t_0": t_0, "t_eff": t_eff}, verbose=verbose)
@@ -79,6 +90,7 @@ class EventFinderGridSearch:
         z_t_eff=5,
         n_min=50,
         n_jobs=1,
+        n_grid_jobs=None,
     ):
         if datasets is None:
             raise ValueError("You must define the datasets!")
@@ -114,7 +126,11 @@ class EventFinderGridSearch:
         # parameters for trimming data
         self.z_t_eff = z_t_eff
         self.n_min = n_min
-        self.n_jobs = _normalise_n_jobs(n_jobs)
+        self.n_jobs = _resolve_n_jobs(
+            n_jobs,
+            n_grid_jobs,
+            caller_name="EventFinderGridSearch",
+        )
 
     # ---------------------------------------------------------------------
     # Setup functions:
@@ -816,6 +832,7 @@ class BaseRectGridSearch(ABC):
         verbose=False,
         progress=False,
         n_jobs=1,
+        n_grid_jobs=None,
     ):
         self.grid_params = grid_params
         self.datasets = datasets
@@ -827,7 +844,11 @@ class BaseRectGridSearch(ABC):
         self.max_expansions = max_expansions
         self.verbose = verbose
         self.progress = progress
-        self.n_jobs = _normalise_n_jobs(n_jobs)
+        self.n_jobs = _resolve_n_jobs(
+            n_jobs,
+            n_grid_jobs,
+            caller_name=f"{self.__class__.__name__}",
+        )
 
         self.results_history = None
         self.minima = None
@@ -1343,6 +1364,7 @@ class BaseRectGridSearch(ABC):
         max_expansions=None,
         progress=None,
         n_jobs=None,
+        n_grid_jobs=None,
     ):
         """Execute grid search.
 
@@ -1385,8 +1407,12 @@ class BaseRectGridSearch(ABC):
         max_exp = max_expansions or self.max_expansions
         if progress is not None:
             self.progress = progress
-        if n_jobs is not None:
-            self.n_jobs = _normalise_n_jobs(n_jobs)
+        if n_jobs is not None or n_grid_jobs is not None:
+            self.n_jobs = _resolve_n_jobs(
+                n_jobs,
+                n_grid_jobs,
+                caller_name=f"{self.__class__.__name__}.run",
+            )
 
         self._point_cache = {}
         self._run_coarse_grid(order, start, nn_init)
@@ -3583,21 +3609,21 @@ class BinaryGridSearch(BaseRectGridSearch):
         datasets,
         static_params,
         grid_params=None,
-        s_min=0.5,
-        s_max=2.0,
-        s_n=10,
+        s_min=0.01,
+        s_max=3.0,
+        s_n=40,
         s_log=True,
-        q_min=0.001,
-        q_max=1.0,
-        q_n=10,
+        q_min=0.0001,
+        q_max=0.5,
+        q_n=40,
         q_log=True,
         alpha_min=0.0,
         alpha_max=360.0,
-        alpha_step=30.0,
+        alpha_step=5.0,
         fitter_kwargs=None,
-        verbose=False,
-        progress=False,
-        fit_method="EmceeLCFitter",
+        verbose=True,
+        progress=True,
+        fit_method="chi2",
         n_jobs=1,
     ):
         """
@@ -3657,15 +3683,17 @@ class BinaryGridSearch(BaseRectGridSearch):
                 ``static_params`` remains fixed.
                 """
 
-        if fit_method not in {"chi2",  "EmceeLCFitter", "LSFitter"}:
+        if fit_method not in {"chi2", "sfit", "EmceeLCFitter", "LSFitter"}:
             raise ValueError(
-                "fit_method must be 'chi2', 'EmceeLCFitter'."
+                "fit_method must be 'chi2', 'sfit', 'EmceeLCFitter', or 'LSFitter'."
             )
         super().__init__(
             datasets=datasets,
             verbose=verbose,
             progress=progress,
             n_jobs=n_jobs,
+            max_refinements=3,
+            max_expansions=3,
         )
 
         self.static_params = static_params.copy()
@@ -3797,7 +3825,13 @@ class BinaryGridSearch(BaseRectGridSearch):
         model_params["s"] = grid_params["s"]
         model_params["q"] = grid_params["q"]
         model_params["alpha"] = grid_params["alpha"]
-        print(f"Evaluating grid point: s={model_params['s']}, q={model_params['q']}, alpha={model_params['alpha']}")
+        if model_params["s"] <= 0 or model_params["q"] <= 0:
+            return {
+                "chi2": np.nan,
+                "params": None,
+                "success": False,
+                "error": "s and q must be positive.",
+            }
         try:
             fitter_kwargs = self.fitter_kwargs
             if self.fit_method == "EmceeLCFitter":
@@ -3877,7 +3911,6 @@ class BinaryGridSearch(BaseRectGridSearch):
                             or "LSFitter returned no best-fit parameters."
                         ),
                     }
-                print(f"LSFitter best-fit parameters: {fitter.best}")
                 return {
                     "chi2": fitter.best["chi2"],
                     "params": {
@@ -3888,11 +3921,12 @@ class BinaryGridSearch(BaseRectGridSearch):
                     "success": fitter.success,
                 }
 
+
             from .mulens_object_config import EventConfig, ModelConfig
 
             model_config = fitter_kwargs.get("model_config", ModelConfig())
             event_config = fitter_kwargs.get("event_config", EventConfig())
-            print(f"Building model with parameters: {model_params} and fitter_kwargs: {fitter_kwargs}, event_config: {event_config}, model_config: {model_config}")
+            #print(f"Building model with parameters: {model_params} and fitter_kwargs: {fitter_kwargs}, event_config: {event_config}, model_config: {model_config}")
             model = model_config.build(
                 parameters=model_params,
                 magnification_methods=fitter_kwargs.get("mag_methods"),
@@ -3901,9 +3935,9 @@ class BinaryGridSearch(BaseRectGridSearch):
                 ),
             )
             event = event_config.build(model=model, datasets=self.datasets)
-            print(f"Evaluating chi2 {event.get_chi2()}")
+            chi2 = event.get_chi2()
             return {
-                "chi2": event.get_chi2(),
+                "chi2": chi2,
                 "params": model_params,
                 "success": True,
             }
