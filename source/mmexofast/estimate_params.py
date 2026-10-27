@@ -554,6 +554,7 @@ class WideAxisParameterEstimator(ParameterEstimator):
         super().__init__(params, limit=limit)
         self._delta_A = None
         self._a_pspl = None
+        self._grid_n_jobs = None  # Number of parallel jobs for grid search; set externally if desired
 
     def get_rho(self):
         """
@@ -2330,7 +2331,7 @@ class WideLowerGridSearchEstimator(
 
     pass
 
-class HighMagGridSearchEstimator(BinaryGridSearch):
+class HighMagGridSearchEstimator(BinaryGridSearch, ParameterEstimator): 
     """
     Grid-only estimator for high-magnification anomalies.
 
@@ -2352,7 +2353,8 @@ class HighMagGridSearchEstimator(BinaryGridSearch):
         fitter_kwargs=None,
         rho=0.001,
         verbose=False,
-        fit_method="LSFitter",
+        grid_n_jobs=None,
+        fit_method="chi2",
     ):
         self.params = params
         self.model_config = model_config or ModelConfig()
@@ -2390,6 +2392,7 @@ class HighMagGridSearchEstimator(BinaryGridSearch):
             fitter_kwargs=search_fitter_kwargs,
             verbose=verbose,
             fit_method=fit_method,
+            n_jobs=grid_n_jobs
         )
         self._binary_params = None
         self._alternate_params = None
@@ -2402,44 +2405,43 @@ class HighMagGridSearchEstimator(BinaryGridSearch):
 
     @property
     def alternate_params(self):
-        if self._alternate_params is None:
-            raise RuntimeError("run() must be called before alternate_params.")
+        """
+        Return the alternate parameters for the binary lens, from minima closes to 1/s of the chi2 grid.
+        """
+        if self._alternate_params is not None:
+            return self._alternate_params
+        
+        binary_params = self.binary_params
+        alternate_s = 1. / binary_params.ulens["s"]
+        local_minima = self.find_local_minima()
+        chi2 =[]
+        s = [] 
+        for minima in local_minima:
+            chi2.append(minima[0])
+            s.append(minima[1]["s"])
+        
+        delta = np.sqrt((s - alternate_s) ** 2 + (chi2 - min(chi2) ** 2))
+        alt_params = local_minima[np.argmin(delta)][1]
+        alt_params = BinaryLensParams(
+                    alt_params, vbbl_accuracy=binary_params.vbbl_accuracy
+                )
+        alt_params.mag_methods = binary_params.mag_methods
+        self._alternate_params = alt_params
         return self._alternate_params
 
     def run(self):
-        super().run(progress=True, refine=True)
-        results = self.results
-        print(f"Grid search results: {results}")
-        finite_chi2 = np.isfinite(results["chi2"])
-        if not finite_chi2.any():
-            errors = (
-                results.loc[:, "error"].dropna().unique().tolist()
-                if "error" in results
-                else []
-            )
-            detail = f" Errors: {errors}" if errors else ""
-            raise RuntimeError(
-                "High-magnification binary-lens grid search produced no "
-                f"finite chi2 values.{detail}"
-            )
-        row = results.loc[results.loc[finite_chi2, "chi2"].idxmin()]
-        fitted_params = row.to_dict()
-        for key in ("s", "q", "alpha", "t_0", "u_0", "t_E", "rho"):
-            fitted_params.setdefault(key, self.static_params.get(key))
-        fitted_params = {
-            key: fitted_params[key]
-            for key in ("t_0", "u_0", "t_E", "s", "q", "alpha", "rho")
-            if fitted_params.get(key) is not None
-        }
-        print(f"Best-fit high mag binary lens parameters: {fitted_params}")
+        super().run(progress=True, refine=False)
+        print(f"Finding local minima: {self.find_local_minima()}")
+        chi2, fitted_params, level = self.find_local_minima()[0]
+        print(f"Best-fit high mag binary lens parameters from level {level}: {chi2} : {fitted_params}")
 
         self._binary_params = BinaryLensParams(fitted_params)
         self._binary_params.set_mag_method(self.params)
 
-        alternate = fitted_params.copy()
-        alternate["s"] = 1.0 / alternate["s"]
-        self._alternate_params = BinaryLensParams(alternate)
-        self._alternate_params.set_mag_method(self.params)
+        # alternate = fitted_params.copy()
+        # alternate["s"] = 1.0 / alternate["s"]
+        # self._alternate_params = BinaryLensParams(alternate)
+        # self._alternate_params.set_mag_method(self.params)
         return self._binary_params
 
 
