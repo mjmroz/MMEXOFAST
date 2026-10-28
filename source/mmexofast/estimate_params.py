@@ -777,6 +777,7 @@ class WideAxisGridSearchEstimator(WideAxisParameterEstimator):
         s_grid=None,
         refine=True,
         nelder_mead_options=None,
+        grid_n_jobs=1
     ):
         super().__init__(params)
         self.datasets = datasets
@@ -796,6 +797,7 @@ class WideAxisGridSearchEstimator(WideAxisParameterEstimator):
         self._s_grid = s_grid
         self.refine = refine
         self.nelder_mead_options = nelder_mead_options
+        self.grid_n_jobs = grid_n_jobs
         self._binary_params = None
         self._results = None
         self._refinement_results = None
@@ -2392,7 +2394,8 @@ class HighMagGridSearchEstimator(BinaryGridSearch, ParameterEstimator):
             fitter_kwargs=search_fitter_kwargs,
             verbose=verbose,
             fit_method=fit_method,
-            n_jobs=grid_n_jobs
+            n_jobs=grid_n_jobs,
+            refinement_bounds={"q": (0.0, 1.0), "alpha": (-10, 370), "s": (0.0, 10.0)}
         )
         self._binary_params = None
         self._alternate_params = None
@@ -2438,10 +2441,6 @@ class HighMagGridSearchEstimator(BinaryGridSearch, ParameterEstimator):
         self._binary_params = BinaryLensParams(fitted_params)
         self._binary_params.set_mag_method(self.params)
 
-        # alternate = fitted_params.copy()
-        # alternate["s"] = 1.0 / alternate["s"]
-        # self._alternate_params = BinaryLensParams(alternate)
-        # self._alternate_params.set_mag_method(self.params)
         return self._binary_params
 
 
