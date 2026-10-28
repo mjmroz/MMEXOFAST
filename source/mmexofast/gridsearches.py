@@ -805,6 +805,10 @@ class BaseRectGridSearch(ABC):
         Number of grid points required for a well-defined minimum. Default 5.
     max_refinements : int
         Maximum refinement iterations per minimum. Default 5.
+    refinement_bounds : dict or None
+        Inclusive hard bounds for parameters during refinement, given as
+        ``{parameter: (minimum, maximum)}`` in actual parameter space.
+        Parameters not included are unrestricted. Default None.
     max_expansions : int
         Maximum edge expansion iterations. Default 5.
     verbose : bool
@@ -828,6 +832,7 @@ class BaseRectGridSearch(ABC):
         use_nearest_neighbor_init=True,
         point_density_in_minimum=5,
         max_refinements=5,
+        refinement_bounds=None,
         max_expansions=5,
         verbose=False,
         progress=False,
@@ -841,6 +846,9 @@ class BaseRectGridSearch(ABC):
         self.use_nearest_neighbor_init = use_nearest_neighbor_init
         self.point_density_in_minimum = point_density_in_minimum
         self.max_refinements = max_refinements
+        self.refinement_bounds = self._validate_refinement_bounds(
+            refinement_bounds
+        )
         self.max_expansions = max_expansions
         self.verbose = verbose
         self.progress = progress
@@ -854,6 +862,34 @@ class BaseRectGridSearch(ABC):
         self.minima = None
         self._point_cache = {}
         self._results = None
+
+    def _validate_refinement_bounds(self, bounds):
+        """Validate and normalize hard bounds used by refinement."""
+        if bounds is None:
+            return None
+        if not isinstance(bounds, dict):
+            raise TypeError("refinement_bounds must be a dict or None.")
+
+        normalized = {}
+        for name, limit in bounds.items():
+            if not isinstance(limit, (tuple, list)) or len(limit) != 2:
+                raise ValueError(
+                    f"refinement_bounds[{name!r}] must be a "
+                    "(minimum, maximum) pair."
+                )
+            lower, upper = limit
+            if lower > upper:
+                raise ValueError(
+                    f"refinement_bounds[{name!r}] minimum must not exceed "
+                    "maximum."
+                )
+            if self._is_log_param(name) and lower <= 0:
+                raise ValueError(
+                    f"refinement_bounds[{name!r}] minimum must be positive "
+                    "for log-spaced parameters."
+                )
+            normalized[name] = (float(lower), float(upper))
+        return normalized
 
     @abstractmethod
     def _fit_grid_point(self, grid_params):
@@ -1373,7 +1409,7 @@ class BaseRectGridSearch(ABC):
         refine : bool
             If True, refine around local minima after coarse grid.
         point_density_in_minimum : int or None
-            Number of points within dchi2=1 of each minimum.
+            Controls how densely each local minimum is sampled during refinement.
             Required if refine=True.
         evaluation_order : str or None
             'standard' or 'outward'. Overrides instance default.
@@ -1994,7 +2030,18 @@ class BaseRectGridSearch(ABC):
         n_steps = half_n + 1
         extent = n_steps * new_step
         center_spec = self._get_spec_space_value(name, center_val)
-        return [center_spec - extent, center_spec + extent, new_step]
+        min_spec = center_spec - extent
+        max_spec = center_spec + extent
+
+        if self.refinement_bounds and name in self.refinement_bounds:
+            lower, upper = self.refinement_bounds[name]
+            lower_spec = self._get_spec_space_value(name, lower)
+            upper_spec = self._get_spec_space_value(name, upper)
+            center_spec = np.clip(center_spec, lower_spec, upper_spec)
+            min_spec = max(center_spec - extent, lower_spec)
+            max_spec = min(center_spec + extent, upper_spec)
+
+        return [min_spec, max_spec, new_step]
 
     def _compute_refined_spec(self, minimum, metadata, n):
         """Compute refined grid_params spec around a minimum.
@@ -3076,6 +3123,9 @@ class BaseRectGridSearch(ABC):
             "start_point": mjs(self.start_point),
             "use_nearest_neighbor_init": bool(self.use_nearest_neighbor_init),
             "max_refinements": int(self.max_refinements),
+            "refinement_bounds": self._make_json_serializable(
+                self.refinement_bounds
+            ),
             "max_expansions": int(self.max_expansions),
             "verbose": bool(self.verbose),
             "results_history": (
@@ -3625,6 +3675,7 @@ class BinaryGridSearch(BaseRectGridSearch):
         progress=True,
         fit_method="chi2",
         n_jobs=1,
+        refinement_bounds=None,
     ):
         """
         Parameters:
@@ -3692,8 +3743,9 @@ class BinaryGridSearch(BaseRectGridSearch):
             verbose=verbose,
             progress=progress,
             n_jobs=n_jobs,
-            max_refinements=3,
-            max_expansions=3,
+            max_refinements=1,
+            max_expansions=1,
+            refinement_bounds=refinement_bounds,
         )
 
         self.static_params = static_params.copy()
