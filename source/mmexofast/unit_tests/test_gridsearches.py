@@ -150,6 +150,166 @@ class TestFlatSFitFunction(unittest.TestCase):
 
 
 class TestBinaryGridSearch(unittest.TestCase):
+    def test_explicit_s_and_q_values_are_used(self):
+        search = gridsearches.BinaryGridSearch(
+            datasets=[],
+            static_params={},
+            s_values=[0.41, 0.73, 2.46],
+            q_values=[0.001, 0.017, 0.3],
+            alpha_min=0.0,
+            alpha_max=0.0,
+            alpha_step=1.0,
+        )
+
+        metadata = search._build_grid_metadata()
+        np.testing.assert_array_equal(
+            metadata["param_arrays"]["s"], [0.41, 0.73, 2.46]
+        )
+        np.testing.assert_array_equal(
+            metadata["param_arrays"]["q"], [0.001, 0.017, 0.3]
+        )
+
+    def test_kh_parameterization_converts_grid_points_to_s_and_q(self):
+        search = gridsearches.BinaryGridSearch(
+            datasets=[],
+            static_params={},
+            parameterization="kh",
+            k_values=[-2.0, -1.0],
+            h_values=[-1.0, 1.0],
+            alpha_min=0.0,
+            alpha_max=0.0,
+            alpha_step=1.0,
+        )
+
+        model_params = search._set_model_params_from_grid(
+            {"k": -1.0, "h": 1.0, "alpha": 0.0}
+        )
+        expected_s, expected_q = gridsearches.KHParameterization().from_kh_to_sq(
+            -1.0, 1.0
+        )
+        self.assertAlmostEqual(model_params["s"], expected_s)
+        self.assertAlmostEqual(model_params["q"], expected_q)
+        self.assertEqual(search.grid_params.keys(), {"k", "h", "alpha"})
+
+    def test_kh_parameterization_applies_s_and_q_bounds(self):
+        search = gridsearches.BinaryGridSearch(
+            datasets=[],
+            static_params={},
+            parameterization="kh",
+            k_values=[-4.0, 2.5],
+            h_values=[0.0, 5.0],
+            alpha_min=0.0,
+            alpha_max=0.0,
+            alpha_step=1.0,
+            bounds={"s": (0.0, 10.0), "q": (0.0, 1.0)},
+        )
+
+        result = search._fit_grid_point({"k": 2.5, "h": 5.0, "alpha": 0.0})
+
+        self.assertFalse(result["success"])
+        self.assertIn("outside bounds", result["error"])
+
+    def test_kh_chi2_result_keeps_grid_parameters_for_refinement(self):
+        model = object()
+        event = Mock()
+        event.get_chi2.return_value = 12.5
+        model_config = Mock()
+        model_config.build.return_value = model
+        event_config = Mock()
+        event_config.build.return_value = event
+        search = gridsearches.BinaryGridSearch(
+            datasets=[],
+            static_params={},
+            parameterization="kh",
+            k_values=[-2.0],
+            h_values=[1.0],
+            alpha_min=0.0,
+            alpha_max=0.0,
+            alpha_step=1.0,
+            fitter_kwargs={
+                "model_config": model_config,
+                "event_config": event_config,
+            },
+        )
+
+        result = search._fit_grid_point({"k": -2.0, "h": 1.0, "alpha": 0.0})
+
+        self.assertEqual(result["params"]["k"], -2.0)
+        self.assertEqual(result["params"]["h"], 1.0)
+        self.assertEqual(result["params"]["alpha"], 0.0)
+
+    def test_refinement_can_be_limited_to_best_minima(self):
+        search = gridsearches.BinaryGridSearch(
+            datasets=[],
+            static_params={},
+            max_refinement_minima=1,
+        )
+        worse = {
+            "chi2": 20.0,
+            "indices": (1, 1),
+            "params": {},
+            "refinement_history": [],
+        }
+        best = {
+            "chi2": 5.0,
+            "indices": (1, 1),
+            "params": {},
+            "refinement_history": [],
+        }
+        minima = [
+            worse,
+            best,
+        ]
+        search.results_history = [
+            {
+                "chi2_grid": np.zeros((3, 3)),
+                "result_grid": np.empty((3, 3), dtype=object),
+                "metadata": {},
+            }
+        ]
+        search._find_minima_in_grid = Mock(return_value=minima)
+        search._is_edge_minimum = Mock(return_value=False)
+        search._refine_minimum = Mock(return_value=[])
+
+        search._run_refinement(5, 1, 1, "standard", False, 1)
+
+        search._refine_minimum.assert_called_once_with(
+            best, 5, 1, False, 1
+        )
+        self.assertEqual(search.minima, [worse])
+
+    def test_refinement_bounds_clip_refined_grid(self):
+        search = gridsearches.BinaryGridSearch(
+            datasets=[],
+            static_params={},
+            s_min=0.5,
+            s_max=2.0,
+            s_n=3,
+            q_min=0.01,
+            q_max=0.1,
+            q_n=3,
+            alpha_min=0.0,
+            alpha_max=30.0,
+            alpha_step=30.0,
+            refinement_bounds={"alpha": (0.0, 20.0), "q": (0.02, 0.08)},
+        )
+
+        spec = search._compute_refined_spec(
+            {
+                "params": {"s": 1.0, "q": 0.03, "alpha": 5.0},
+            },
+            {
+                "param_names": ["s", "q", "alpha"],
+                "steps": {"s": 0.5, "q": 0.03, "alpha": 30.0},
+            },
+            n=5,
+        )
+
+        assert spec["alpha"][0] >= 0.0
+        assert spec["alpha"][1] <= 20.0
+        assert spec["q"][0] >= 0.02
+        assert spec["q"][1] <= 0.08
+
     def test_run_uses_binary_grid_configuration(self):
         search = gridsearches.BinaryGridSearch(
             datasets=[],
