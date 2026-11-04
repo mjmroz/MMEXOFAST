@@ -148,11 +148,35 @@ class BinaryLensParams:
     _DEFAULT_VBBL_ACCURACY = 0.01
 
     def __init__(self, ulens, vbbl_accuracy=_DEFAULT_VBBL_ACCURACY):
-        self.ulens = ulens
+        self.ulens = self._remove_kh(ulens)
         self.vbbl_accuracy = vbbl_accuracy
         self.mag_methods = None
         self.params = None
+    
+    def _remove_kh(self, ulens):
+        """
+        Remove the 'k' and 'h' keys from the lens parameter dictionary.
 
+        Parameters
+        ----------
+        ulens : dict
+            Binary lens parameter dictionary.
+
+        Returns
+        -------
+        dict
+            The lens parameter dictionary with the 'k' and 'h' keys removed.
+        """
+        ulens = ulens.copy()
+        k = ulens.pop("k", None)
+        h = ulens.pop("h", None)
+        if "s" not in ulens or "q" not in ulens:
+            if k is not None and h is not None:
+                kh_param = KHParameterization()
+                s, q = kh_param.from_kh_to_sq(k, h)
+                ulens["s"] = s
+                ulens["q"] = q 
+        return ulens
     @property
     def mag_methods_parameters(self):
         """
@@ -2395,7 +2419,15 @@ class HighMagGridSearchEstimator(BinaryGridSearch, ParameterEstimator):
             verbose=verbose,
             fit_method=fit_method,
             n_jobs=grid_n_jobs,
-            refinement_bounds={"q": (0.0, 1.0), "alpha": (-10, 370), "s": (0.0, 10.0)}
+            parameterization='kh',
+            max_refinement_minima=6,
+            bounds={
+                "k": (-4, 2.5),
+                "h": (-5, 5),
+                "s": (0.0, 10.0),
+                "q": (0.0, 1.0),
+                "alpha": (-10, 370),
+            }
         )
         self._binary_params = None
         self._alternate_params = None
@@ -2423,7 +2455,7 @@ class HighMagGridSearchEstimator(BinaryGridSearch, ParameterEstimator):
             chi2.append(minima[0])
             s.append(minima[1]["s"])
         
-        delta = np.sqrt((s - alternate_s) ** 2 + (chi2 - min(chi2) ** 2))
+        delta = np.sqrt((np.array(s) - alternate_s) ** 2 + (np.array(chi2) - min(chi2) ** 2))
         alt_params = local_minima[np.argmin(delta)][1]
         alt_params = BinaryLensParams(
                     alt_params, vbbl_accuracy=binary_params.vbbl_accuracy
