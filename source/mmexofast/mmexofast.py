@@ -544,6 +544,7 @@ class MMEXOFASTFitter:
         "no_parallax",
         "parallax_grid",
         "grid_n_jobs",
+        "parallel_refinement",
         "primary_location",
         "primary_dataset",
         "emcee_settings",
@@ -590,6 +591,7 @@ class MMEXOFASTFitter:
         no_parallax: bool = False,
         parallax_grid: bool = False,
         grid_n_jobs: int = 1,
+        parallel_refinement: bool = False,
         primary_location=None,
         primary_dataset=None,
         emcee_settings=None,
@@ -2665,6 +2667,7 @@ class MMEXOFASTFitter:
                 skip_optimization=False,
                 verbose=False,
                 n_jobs=self.grid_n_jobs,
+                parallel_refinement=self.parallel_refinement,
             )
             grid.run(refine=True)
             grids[par_branch] = grid

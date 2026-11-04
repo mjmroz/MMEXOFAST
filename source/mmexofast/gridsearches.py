@@ -3,10 +3,12 @@ import logging
 import math
 import multiprocessing
 import warnings
+import os
 from abc import ABC, abstractmethod
 from collections import deque
 from itertools import combinations
 from itertools import product as iproduct
+from .utilities import KHParameterization
 
 import matplotlib.pyplot as plt
 import MulensModel
@@ -51,7 +53,19 @@ def _event_finder_grid_point(args):
 
 def _rect_grid_point(args):
     search, point = args
+    print(
+        f"[worker] pid={os.getpid()}, "
+        f"class={search.__class__.__name__}, point={point}",
+        flush=True,
+    )
     return search._fit_grid_point(point)
+
+
+def _refine_minimum_worker(args):
+    """Refine one minimum with grid-point evaluation kept serial."""
+    search, minimum, n, max_ref, nn_init, max_exp = args
+    search.n_jobs = 1
+    return search._refine_minimum(minimum, n, max_ref, nn_init, max_exp)
 
 
 class NoAnomalyFoundError(ValueError):
@@ -805,8 +819,15 @@ class BaseRectGridSearch(ABC):
         Number of grid points required for a well-defined minimum. Default 5.
     max_refinements : int
         Maximum refinement iterations per minimum. Default 5.
-    refinement_bounds : dict or None
-        Inclusive hard bounds for parameters during refinement, given as
+    max_refinement_minima : int or None
+        Maximum number of lowest-chi2 minima to refine. ``None`` refines all
+        minima. Default None.
+    parallel_refinement : bool
+        If True, use ``n_jobs`` to refine different minima in parallel.
+        Grid points within each minimum are then evaluated serially.
+        Default False.
+    bounds : dict or None
+        Inclusive hard bounds for parameters, given as
         ``{parameter: (minimum, maximum)}`` in actual parameter space.
         Parameters not included are unrestricted. Default None.
     max_expansions : int
@@ -832,6 +853,9 @@ class BaseRectGridSearch(ABC):
         use_nearest_neighbor_init=True,
         point_density_in_minimum=5,
         max_refinements=5,
+        max_refinement_minima=None,
+        parallel_refinement=False,
+        bounds=None,
         refinement_bounds=None,
         max_expansions=5,
         verbose=False,
@@ -846,8 +870,22 @@ class BaseRectGridSearch(ABC):
         self.use_nearest_neighbor_init = use_nearest_neighbor_init
         self.point_density_in_minimum = point_density_in_minimum
         self.max_refinements = max_refinements
-        self.refinement_bounds = self._validate_refinement_bounds(
-            refinement_bounds
+        if max_refinement_minima is not None and (
+            not isinstance(max_refinement_minima, int)
+            or isinstance(max_refinement_minima, bool)
+            or max_refinement_minima < 0
+        ):
+            raise ValueError(
+                "max_refinement_minima must be a non-negative integer or None."
+            )
+        self.max_refinement_minima = max_refinement_minima
+        if not isinstance(parallel_refinement, bool):
+            raise TypeError("parallel_refinement must be a bool.")
+        self.parallel_refinement = parallel_refinement
+        if bounds is not None and refinement_bounds is not None:
+            raise ValueError("Specify only one of bounds or refinement_bounds.")
+        self.bounds = self._validate_bounds(
+            bounds if bounds is not None else refinement_bounds
         )
         self.max_expansions = max_expansions
         self.verbose = verbose
@@ -863,29 +901,29 @@ class BaseRectGridSearch(ABC):
         self._point_cache = {}
         self._results = None
 
-    def _validate_refinement_bounds(self, bounds):
-        """Validate and normalize hard bounds used by refinement."""
+    def _validate_bounds(self, bounds):
+        """Validate and normalize hard parameter bounds."""
         if bounds is None:
             return None
         if not isinstance(bounds, dict):
-            raise TypeError("refinement_bounds must be a dict or None.")
+            raise TypeError("bounds must be a dict or None.")
 
         normalized = {}
         for name, limit in bounds.items():
             if not isinstance(limit, (tuple, list)) or len(limit) != 2:
                 raise ValueError(
-                    f"refinement_bounds[{name!r}] must be a "
+                    f"bounds[{name!r}] must be a "
                     "(minimum, maximum) pair."
                 )
             lower, upper = limit
             if lower > upper:
                 raise ValueError(
-                    f"refinement_bounds[{name!r}] minimum must not exceed "
+                    f"bounds[{name!r}] minimum must not exceed "
                     "maximum."
                 )
             if self._is_log_param(name) and lower <= 0:
                 raise ValueError(
-                    f"refinement_bounds[{name!r}] minimum must be positive "
+                    f"bounds[{name!r}] minimum must be positive "
                     "for log-spaced parameters."
                 )
             normalized[name] = (float(lower), float(upper))
@@ -1397,6 +1435,8 @@ class BaseRectGridSearch(ABC):
         start_point=None,
         use_nearest_neighbor_init=None,
         max_refinements=None,
+        max_refinement_minima=None,
+        parallel_refinement=None,
         max_expansions=None,
         progress=None,
         n_jobs=None,
@@ -1419,6 +1459,12 @@ class BaseRectGridSearch(ABC):
             Overrides instance default.
         max_refinements : int or None
             Overrides instance default.
+        max_refinement_minima : int or None
+            Maximum number of lowest-chi2 minima to refine. Overrides the
+            instance default. ``None`` means all minima.
+        parallel_refinement : bool or None
+            If True, parallelize across minima instead of grid points within
+            each minimum. Overrides the instance default.
         max_expansions : int or None
             Overrides instance default.
         progress : bool or None
@@ -1440,6 +1486,16 @@ class BaseRectGridSearch(ABC):
         )
         pt_dens = point_density_in_minimum or self.point_density_in_minimum
         max_ref = max_refinements or self.max_refinements
+        max_ref_minima = (
+            max_refinement_minima
+            if max_refinement_minima is not None
+            else self.max_refinement_minima
+        )
+        parallel_refine = (
+            parallel_refinement
+            if parallel_refinement is not None
+            else self.parallel_refinement
+        )
         max_exp = max_expansions or self.max_expansions
         if progress is not None:
             self.progress = progress
@@ -1454,7 +1510,15 @@ class BaseRectGridSearch(ABC):
         self._run_coarse_grid(order, start, nn_init)
 
         if refine:
-            self._run_refinement(pt_dens, max_ref, max_exp, order, nn_init)
+            self._run_refinement(
+                pt_dens,
+                max_ref,
+                max_exp,
+                order,
+                nn_init,
+                max_ref_minima,
+                parallel_refine,
+            )
 
     # ----------------------------------------------------------------
     # Minima finding
@@ -1708,16 +1772,29 @@ class BaseRectGridSearch(ABC):
                     np.log10(param_array[0])
                     - np.arange(n_expand, 0, -1) * step
                 )
-                return np.concatenate([10.0**new_log, param_array])
-            new_log = (
-                np.log10(param_array[-1]) + np.arange(1, n_expand + 1) * step
-            )
-            return np.concatenate([param_array, 10.0**new_log])
+                new_values = 10.0**new_log
+            else:
+                new_log = (
+                    np.log10(param_array[-1])
+                    + np.arange(1, n_expand + 1) * step
+                )
+                new_values = 10.0**new_log
+            if self.bounds and name in self.bounds:
+                lower, upper = self.bounds[name]
+                new_values = np.clip(new_values, lower, upper)
+            if direction == -1:
+                return np.concatenate([new_values, param_array])
+            return np.concatenate([param_array, new_values])
 
         if direction == -1:
             new_vals = param_array[0] - np.arange(n_expand, 0, -1) * step
+        else:
+            new_vals = param_array[-1] + np.arange(1, n_expand + 1) * step
+        if self.bounds and name in self.bounds:
+            lower, upper = self.bounds[name]
+            new_vals = np.clip(new_vals, lower, upper)
+        if direction == -1:
             return np.concatenate([new_vals, param_array])
-        new_vals = param_array[-1] + np.arange(1, n_expand + 1) * step
         return np.concatenate([param_array, new_vals])
 
     def _expand_array_along_dim(self, arr, dim, direction, n_expand):
@@ -2033,8 +2110,8 @@ class BaseRectGridSearch(ABC):
         min_spec = center_spec - extent
         max_spec = center_spec + extent
 
-        if self.refinement_bounds and name in self.refinement_bounds:
-            lower, upper = self.refinement_bounds[name]
+        if self.bounds and name in self.bounds:
+            lower, upper = self.bounds[name]
             lower_spec = self._get_spec_space_value(name, lower)
             upper_spec = self._get_spec_space_value(name, upper)
             center_spec = np.clip(center_spec, lower_spec, upper_spec)
@@ -2298,6 +2375,8 @@ class BaseRectGridSearch(ABC):
         subgrid_data : dict
         converged : bool
         """
+
+        logger.debug(f"Refining minimum at level {level}: {minimum}")
         current_metadata = (
             minimum["refinement_history"][-1]["metadata"]
             if minimum["refinement_history"]
@@ -2398,7 +2477,16 @@ class BaseRectGridSearch(ABC):
     # Refinement: entry point
     # ----------------------------------------------------------------
 
-    def _run_refinement(self, n, max_ref, max_exp, order, nn_init):
+    def _run_refinement(
+        self,
+        n,
+        max_ref,
+        max_exp,
+        order,
+        nn_init,
+        max_refinement_minima=None,
+        parallel_refinement=False,
+    ):
         """Find coarse minima, expand edges, refine each minimum.
 
         Parameters
@@ -2409,6 +2497,10 @@ class BaseRectGridSearch(ABC):
         max_exp : int
         order : str
         nn_init : bool
+        max_refinement_minima : int or None
+            Maximum number of lowest-chi2 minima to refine.
+        parallel_refinement : bool
+            Whether to refine different minima in parallel.
         """
         # TODO: use Claude to clean up this entire workflow so there aren't 5 args being passed.
         level_data = self.results_history[0]
@@ -2420,8 +2512,16 @@ class BaseRectGridSearch(ABC):
             self.minima = []
             return
 
+        coarse_minima.sort(key=lambda minimum: minimum["chi2"])
+        if max_refinement_minima is None:
+            minima_to_refine = coarse_minima
+            minima_to_keep = []
+        else:
+            minima_to_refine = coarse_minima[:max_refinement_minima]
+            minima_to_keep = coarse_minima[max_refinement_minima:]
+
         strip_width = max(3, n)
-        for i, minimum in enumerate(coarse_minima):
+        for i, minimum in enumerate(minima_to_refine):
             if self._is_edge_minimum(
                 minimum["indices"], level_data["chi2_grid"].shape
             ):
@@ -2433,16 +2533,28 @@ class BaseRectGridSearch(ABC):
                     nn_init,
                     max_exp,
                 )
-                coarse_minima[i] = minimum
+                minima_to_refine[i] = minimum
 
         self.results_history[0] = level_data
 
-        self.minima = []
-        for minimum in coarse_minima:
-            refined = self._refine_minimum(
-                minimum, n, max_ref, nn_init, max_exp
-            )
-            self.minima.extend(refined)
+        self.minima = minima_to_keep
+        if parallel_refinement and self.n_jobs > 1 and len(minima_to_refine) > 1:
+            with multiprocessing.Pool(self.n_jobs) as pool:
+                refined_groups = pool.map(
+                    _refine_minimum_worker,
+                    [
+                        (self, minimum, n, max_ref, nn_init, max_exp)
+                        for minimum in minima_to_refine
+                    ],
+                )
+            for refined in refined_groups:
+                self.minima.extend(refined)
+        else:
+            for minimum in minima_to_refine:
+                self.minima.extend(
+                    self._refine_minimum(minimum, n, max_ref, nn_init, max_exp)
+                )
+        self.minima.sort(key=lambda minimum: minimum["chi2"])
 
     # ----------------------------------------------------------------
     # Uncertainties
@@ -2691,7 +2803,7 @@ class BaseRectGridSearch(ABC):
                 markeredgewidth=2,
             )
 
-    def _plot_1d_projection(self, ax, chi2_1d, param_array, name, minima_list):
+    def _plot_1d_projection(self, ax, chi2_1d, param_array, name, minima_list, chi2_range):
         """Plot 1D marginalized chi2 projection.
 
         Parameters
@@ -2714,6 +2826,7 @@ class BaseRectGridSearch(ABC):
             ax.axvline(params[name], color="k", linestyle=":")
         ax.set_xlabel(name)
         ax.set_ylabel(r"$\chi^2$")
+
         ax.legend(fontsize=8)
 
     def _plot_2d_projections(self, axes, chi2_grid, metadata, minima_list):
@@ -2756,12 +2869,13 @@ class BaseRectGridSearch(ABC):
         metadata : dict
         minima_list : list of tuple
         """
+        chi2_range = [np.nanmin(chi2_grid)-1, np.percentile(chi2_grid, 95 )]        
         param_names = metadata["param_names"]
         param_arrays = metadata["param_arrays"]
         for ax, (dim, name) in zip(axes, enumerate(param_names)):
             chi2_1d = self._marginalize_1d(chi2_grid, dim)
             self._plot_1d_projection(
-                ax, chi2_1d, param_arrays[name], name, minima_list
+                ax, chi2_1d, param_arrays[name], name, minima_list, chi2_range,
             )
 
     def _create_figure(self, n_2d, n_1d):
@@ -3123,9 +3237,9 @@ class BaseRectGridSearch(ABC):
             "start_point": mjs(self.start_point),
             "use_nearest_neighbor_init": bool(self.use_nearest_neighbor_init),
             "max_refinements": int(self.max_refinements),
-            "refinement_bounds": self._make_json_serializable(
-                self.refinement_bounds
-            ),
+            "max_refinement_minima": self.max_refinement_minima,
+            "parallel_refinement": self.parallel_refinement,
+            "bounds": self._make_json_serializable(self.bounds),
             "max_expansions": int(self.max_expansions),
             "verbose": bool(self.verbose),
             "results_history": (
@@ -3206,6 +3320,11 @@ class BaseRectGridSearch(ABC):
             "use_nearest_neighbor_init"
         ]
         instance.max_refinements = base_data["max_refinements"]
+        instance.max_refinement_minima = base_data.get("max_refinement_minima")
+        instance.parallel_refinement = base_data.get("parallel_refinement", False)
+        instance.bounds = base_data.get(
+            "bounds", base_data.get("refinement_bounds")
+        )
         instance.max_expansions = base_data["max_expansions"]
         instance.verbose = base_data["verbose"]
 
@@ -3663,10 +3782,12 @@ class BinaryGridSearch(BaseRectGridSearch):
         s_max=3.0,
         s_n=40,
         s_log=True,
+        s_values=None,
         q_min=0.0001,
         q_max=0.5,
         q_n=40,
         q_log=True,
+        q_values=None,
         alpha_min=0.0,
         alpha_max=360.0,
         alpha_step=5.0,
@@ -3675,7 +3796,19 @@ class BinaryGridSearch(BaseRectGridSearch):
         progress=True,
         fit_method="chi2",
         n_jobs=1,
+        bounds=None,
         refinement_bounds=None,
+        max_refinement_minima=None,
+        parameterization="sq",
+        parallel_refinement=False,
+        k_min=-4.0,
+        k_max=2.5,
+        k_n=40,
+        k_values=None,
+        h_min=-5.0,
+        h_max=5.0,
+        h_n=40,
+        h_values=None,
     ):
         """
         Parameters:
@@ -3697,6 +3830,9 @@ class BinaryGridSearch(BaseRectGridSearch):
             s_log: *bool*
                 If True, use logarithmic spacing for s.
                 Ignored if grid_params provided.
+            s_values: sequence of float or None
+                Explicit values at which to evaluate s. If provided, these
+                take precedence over s_min, s_max, s_n, and s_log.
             q_min, q_max: *float*
                 Min/max values for mass ratio. Ignored if grid_params provided.
             q_n: *int*
@@ -3705,6 +3841,9 @@ class BinaryGridSearch(BaseRectGridSearch):
             q_log: *bool*
                 If True, use logarithmic spacing for q.
                 Ignored if grid_params provided.
+            q_values: sequence of float or None
+                Explicit values at which to evaluate q. If provided, these
+                take precedence over q_min, q_max, q_n, and q_log.
             alpha_min, alpha_max: *float*
                 Min/max values for source trajectory angle (degrees).
                 Ignored if grid_params provided.
@@ -3738,6 +3877,8 @@ class BinaryGridSearch(BaseRectGridSearch):
             raise ValueError(
                 "fit_method must be 'chi2', 'sfit', 'EmceeLCFitter', or 'LSFitter'."
             )
+        if parameterization not in {"sq", "kh"}:
+            raise ValueError("parameterization must be 'sq' or 'kh'.")
         super().__init__(
             datasets=datasets,
             verbose=verbose,
@@ -3745,32 +3886,48 @@ class BinaryGridSearch(BaseRectGridSearch):
             n_jobs=n_jobs,
             max_refinements=1,
             max_expansions=1,
+            bounds=bounds,
             refinement_bounds=refinement_bounds,
+            max_refinement_minima=max_refinement_minima,
+            parallel_refinement=parallel_refinement,
         )
 
         self.static_params = static_params.copy()
+        self.parameterization = parameterization
 
         # Keep the binary-search configuration separate from the rectangular
         # grid specification consumed by BaseRectGridSearch.
         if grid_params is not None:
             binary_grid_params = grid_params.copy()
             # Validate required keys
-            required_keys = [
-                "s_min",
-                "s_max",
-                "s_n",
-                "s_log",
-                "q_min",
-                "q_max",
-                "q_n",
-                "q_log",
-                "alpha_min",
-                "alpha_max",
-                "alpha_step",
-            ]
-            missing_keys = [
-                k for k in required_keys if k not in binary_grid_params
-            ]
+            names = ("s", "q") if parameterization == "sq" else ("k", "h")
+            required_keys = ["alpha_min", "alpha_max", "alpha_step"]
+            for name in names:
+                required_keys.extend(
+                    f"{name}_{suffix}" for suffix in ("min", "max", "n")
+                )
+                if name in ("s", "q"):
+                    required_keys.append(f"{name}_log")
+                values_key = f"{name}_values"
+                if values_key in binary_grid_params:
+                    self._validate_grid_values(
+                        name,
+                        binary_grid_params[values_key],
+                        positive=name in ("s", "q"),
+                    )
+                    values = np.asarray(
+                        binary_grid_params[values_key], dtype=float
+                    )
+                    binary_grid_params.setdefault(f"{name}_min", values[0])
+                    binary_grid_params.setdefault(f"{name}_max", values[-1])
+                    binary_grid_params.setdefault(f"{name}_n", len(values))
+                    if name in ("s", "q"):
+                        binary_grid_params.setdefault(f"{name}_log", False)
+                    for key in (f"{name}_min", f"{name}_max", f"{name}_n"):
+                        required_keys.remove(key)
+                    if name in ("s", "q"):
+                        required_keys.remove(f"{name}_log")
+            missing_keys = [k for k in required_keys if k not in binary_grid_params]
             if missing_keys:
                 raise ValueError(
                     f"grid_params missing required keys: {missing_keys}"
@@ -3781,41 +3938,52 @@ class BinaryGridSearch(BaseRectGridSearch):
                 "s_max": s_max,
                 "s_n": s_n,
                 "s_log": s_log,
+                "s_values": s_values,
                 "q_min": q_min,
                 "q_max": q_max,
                 "q_n": q_n,
                 "q_log": q_log,
+                "q_values": q_values,
+                "k_min": k_min,
+                "k_max": k_max,
+                "k_n": k_n,
+                "k_values": k_values,
+                "h_min": h_min,
+                "h_max": h_max,
+                "h_n": h_n,
+                "h_values": h_values,
                 "alpha_min": alpha_min,
                 "alpha_max": alpha_max,
                 "alpha_step": alpha_step,
             }
 
         self.binary_grid_params = binary_grid_params
+        for name in ("s", "q", "k", "h"):
+            values = binary_grid_params.get(f"{name}_values")
+            if values is not None:
+                self._validate_grid_values(
+                    name, values, positive=name in ("s", "q")
+                )
+        names = ("s", "q") if parameterization == "sq" else ("k", "h")
         self.grid_params = {
-            "s": [
-                binary_grid_params["s_min"],
-                binary_grid_params["s_max"],
+            name: [
+                binary_grid_params[f"{name}_min"],
+                binary_grid_params[f"{name}_max"],
                 self._grid_step(
-                    binary_grid_params["s_min"],
-                    binary_grid_params["s_max"],
-                    binary_grid_params["s_n"],
+                    binary_grid_params[f"{name}_min"],
+                    binary_grid_params[f"{name}_max"],
+                    binary_grid_params[f"{name}_n"],
                 ),
-            ],
-            "q": [
-                binary_grid_params["q_min"],
-                binary_grid_params["q_max"],
-                self._grid_step(
-                    binary_grid_params["q_min"],
-                    binary_grid_params["q_max"],
-                    binary_grid_params["q_n"],
-                ),
-            ],
+            ]
+            for name in names
+        }
+        self.grid_params.update({
             "alpha": [
                 binary_grid_params["alpha_min"],
                 binary_grid_params["alpha_max"],
                 binary_grid_params["alpha_step"],
             ],
-        }
+        })
         self.fitter_kwargs = fitter_kwargs if fitter_kwargs is not None else {}
         self.fit_method = fit_method
 
@@ -3826,14 +3994,38 @@ class BinaryGridSearch(BaseRectGridSearch):
             raise ValueError("Grid point counts must be positive.")
         return (max_val - min_val) / max(n - 1, 1)
 
+    @staticmethod
+    def _validate_grid_values(name, values, positive=True):
+        """Validate explicit values for a binary grid parameter."""
+        if values is None:
+            return
+        values = np.asarray(values, dtype=float)
+        if values.ndim != 1 or len(values) == 0:
+            raise ValueError(f"{name}_values must be a non-empty 1D sequence.")
+        if not np.all(np.isfinite(values)) or np.any(np.diff(values) <= 0):
+            raise ValueError(
+                f"{name}_values must contain finite, strictly increasing values."
+            )
+        if positive and np.any(values <= 0):
+            raise ValueError(f"{name}_values must contain positive values.")
+
     def _build_param_array(self, name, spec):
         """Build binary grids using the legacy linear/log configuration."""
         if name in ("s", "q"):
+            explicit_values = self.binary_grid_params.get(f"{name}_values")
+            if explicit_values is not None and list(spec) == list(
+                self.grid_params[name]
+            ):
+                return np.asarray(explicit_values, dtype=float)
             config_name = f"{name}_log"
             min_val, max_val, _ = spec
             n = self.binary_grid_params[f"{name}_n"]
             if self.binary_grid_params[config_name]:
                 return np.geomspace(min_val, max_val, n)
+        if name in ("k", "h"):
+            values = self.binary_grid_params.get(f"{name}_values")
+            if values is not None:
+                return np.asarray(values, dtype=float)
         return super()._build_param_array(name, spec)
 
     def _get_bounds(self, grid_params):
@@ -3858,6 +4050,24 @@ class BinaryGridSearch(BaseRectGridSearch):
             )
         return bounds
 
+    def _set_model_params_from_grid(self, grid_params):
+        """Set model parameters from a grid point.
+        If kh parameterization is used, convert k and h to s and q.
+        Based on Hall (2024) https://iopscience.iop.org/article/10.1088/1538-3873/ad70d7/pdf
+        """
+        model_params = self.static_params.copy()
+        if "k" in grid_params and "h" in grid_params:
+            model_params["s"], model_params["q"] = (
+                KHParameterization().from_kh_to_sq(
+                    grid_params["k"], grid_params["h"]
+                )
+            )
+        else:
+            model_params["s"] = grid_params["s"]
+            model_params["q"] = grid_params["q"]
+        model_params["alpha"] = grid_params["alpha"]
+        return model_params
+
     def _fit_grid_point(self, grid_params):
         """
         Evaluate chi2 for one grid point without fitting.
@@ -3871,12 +4081,12 @@ class BinaryGridSearch(BaseRectGridSearch):
                 Contains 'chi2', 'params' (best-fit parameters),
                 'success', and any other fitter output
         """
-
+        model_params = self._set_model_params_from_grid(grid_params)
+        grid_result_params = {
+            key: value for key, value in grid_params.items() if not key.startswith("_")
+        }
         # Combine static params with this grid point's binary values
-        model_params = self.static_params.copy()
-        model_params["s"] = grid_params["s"]
-        model_params["q"] = grid_params["q"]
-        model_params["alpha"] = grid_params["alpha"]
+
         if model_params["s"] <= 0 or model_params["q"] <= 0:
             return {
                 "chi2": np.nan,
@@ -3884,13 +4094,25 @@ class BinaryGridSearch(BaseRectGridSearch):
                 "success": False,
                 "error": "s and q must be positive.",
             }
+        for name in ("s", "q"):
+            if self.bounds and name in self.bounds:
+                lower, upper = self.bounds[name]
+                if not lower <= model_params[name] <= upper:
+                    return {
+                        "chi2": np.nan,
+                        "params": None,
+                        "success": False,
+                        "error": (
+                            f"{name}={model_params[name]} is outside "
+                            f"bounds ({lower}, {upper})."
+                        ),
+                    }
         try:
             fitter_kwargs = self.fitter_kwargs
             if self.fit_method == "EmceeLCFitter":
                 from .fitters import EmceeLCFitter
 
                 fitter_kwargs = fitter_kwargs.copy()
-                print(f"Using EmceeLCFitter with fitter_kwargs: {fitter_kwargs}")
                 emcee_settings = {
                     "n_walkers": 10,
                     "n_burn": 100,
@@ -3938,7 +4160,8 @@ class BinaryGridSearch(BaseRectGridSearch):
                         key: value
                         for key, value in fitter.best.items()
                         if key != "chi2"
-                    },
+                    }
+                    | grid_result_params,
                     "success": fitter.success,
                 }
             elif self.fit_method == "LSFitter":
@@ -3969,7 +4192,8 @@ class BinaryGridSearch(BaseRectGridSearch):
                         key: value
                         for key, value in fitter.best.items()
                         if key != "chi2"
-                    },
+                    }
+                    | grid_result_params,
                     "success": fitter.success,
                 }
 
@@ -3978,7 +4202,6 @@ class BinaryGridSearch(BaseRectGridSearch):
 
             model_config = fitter_kwargs.get("model_config", ModelConfig())
             event_config = fitter_kwargs.get("event_config", EventConfig())
-            #print(f"Building model with parameters: {model_params} and fitter_kwargs: {fitter_kwargs}, event_config: {event_config}, model_config: {model_config}")
             model = model_config.build(
                 parameters=model_params,
                 magnification_methods=fitter_kwargs.get("mag_methods"),
@@ -3988,9 +4211,10 @@ class BinaryGridSearch(BaseRectGridSearch):
             )
             event = event_config.build(model=model, datasets=self.datasets)
             chi2 = event.get_chi2()
+            print(f"  Grid point evaluated: s={model_params['s']}, q={model_params['q']}, alpha={model_params['alpha']}, chi2={chi2}")
             return {
                 "chi2": chi2,
-                "params": model_params,
+                "params": model_params | grid_result_params,
                 "success": True,
             }
 

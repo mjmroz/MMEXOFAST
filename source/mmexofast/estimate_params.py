@@ -2465,11 +2465,10 @@ class HighMagGridSearchEstimator(BinaryGridSearch, ParameterEstimator):
         return self._alternate_params
 
     def run(self):
-        super().run(progress=True, refine=False)
+        super().run(progress=True, refine = True)
         print(f"Finding local minima: {self.find_local_minima()}")
         chi2, fitted_params, level = self.find_local_minima()[0]
         print(f"Best-fit high mag binary lens parameters from level {level}: {chi2} : {fitted_params}")
-
         self._binary_params = BinaryLensParams(fitted_params)
         self._binary_params.set_mag_method(self.params)
 
