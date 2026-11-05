@@ -177,6 +177,8 @@ class Observatory:
             found, rather than passing a nonexistent path on to MulensModel.
         """
         kwargs = {"phot_fmt": self.phot_fmt}
+        # zero_point is set to 26 as Roman will go below standard zero point of 22.
+        # kwargs["zero_point"] = 26.0
         if self.usecols is not None:
             kwargs["usecols"] = self.usecols
 
