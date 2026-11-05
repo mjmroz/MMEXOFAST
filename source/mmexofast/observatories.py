@@ -1,5 +1,8 @@
 import os.path
 
+import numpy as np
+from astropy.time import Time
+
 from .config import PACKAGE_DATA_PATH
 from .dc18 import get_ephemerides as get_dc18_ephemerides
 
@@ -32,6 +35,7 @@ def get_kwargs(filename):
         kwargs = obs.get_kwargs()
         kwargs["bandpass"] = band
         kwargs["plot_properties"] = obs.get_plot_properties(band)
+        kwargs["telescope"] = telescope
         # Override label with filename
         kwargs["plot_properties"]["label"] = label
     else:
@@ -72,6 +76,48 @@ def get_telescope_band_from_filename(filename):
     band = basename[1]
     telescope = basename[2]
     return telescope, band
+
+
+def set_filename_from_MulensData(mulensdata, suffix="MMEXOFAST"):
+    """
+    Construct a filename stored in the MulensData.plot_properties object.
+    Parameters
+    ----------
+    mulensdata : MulensData
+        MulensData object
+    suffix : str, optional
+        Suffix to append to the filename (default: "")
+    """
+    date = Time(
+        mulensdata.time[np.argmax(mulensdata.flux)], format="jd"
+    ).strftime("%Y%m%d")
+
+    telescope = getattr(mulensdata, "telescope", None)
+    band = getattr(mulensdata, "bandpass", None)
+
+    if telescope is None or band is None:
+        label = mulensdata.plot_properties.get("label")
+        if label is not None:
+            parsed_telescope, parsed_band = get_telescope_band_from_filename(
+                label
+            )
+            telescope = (
+                telescope if telescope is not None else parsed_telescope
+            )
+            band = band if band is not None else parsed_band
+
+    if telescope is None or band is None:
+        raise ValueError(
+            "Cannot determine telescope and band for MulensData; "
+            "set telescope/bandpass or use a filename label in the format "
+            "nYYYYMMDD.BAND.TELESCOPE.whateveryouwant."
+        )
+
+    mulensdata._telescope = telescope
+    mulensdata.bandpass = band
+    mulensdata.plot_properties["label"] = (
+        f"n{date}.{band}.{telescope}.{suffix}.dat".rstrip(".")
+    )
 
 
 # ============================================================================
