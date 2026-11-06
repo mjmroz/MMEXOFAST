@@ -138,7 +138,9 @@ class TestLSFitter(unittest.TestCase):
 
         with (
             patch.object(fitter, "ln_prob", return_value=-7.0) as ln_prob,
-            patch("mmexofast.fitters.minimize", return_value=result) as minimize,
+            patch(
+                "mmexofast.fitters.minimize", return_value=result
+            ) as minimize,
         ):
             returned = fitter.run()
             objective = minimize.call_args.args[0]

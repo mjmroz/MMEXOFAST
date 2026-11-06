@@ -1147,6 +1147,7 @@ class EmceeLCFitter(MulensFitter):
             parameters_to_fit=self.parameters_to_fit,
         )
 
+
 class LSFitter(EmceeLCFitter):
     """
     Fit a microlensing light curve using the Levenberg-Marquardt algorithm.
@@ -1161,6 +1162,7 @@ class LSFitter(EmceeLCFitter):
     ``event_config``, ``pool``, …) are inherited from :class:`EmceeLCFitter`
     and :class:`MulensFitter`.
     """
+
     def __init__(self, bounds=None, **kwargs):
         super().__init__(**kwargs)
         self.bounds = bounds
@@ -1186,9 +1188,15 @@ class LSFitter(EmceeLCFitter):
             self.bounds = (lower_bounds, upper_bounds)
 
         if not isinstance(self.bounds, tuple) or len(self.bounds) != 2:
-            raise ValueError("Bounds must be a tuple of two lists (lower_bounds, upper_bounds).")
-        if len(self.bounds[0]) != len(self.parameters_to_fit) or len(self.bounds[1]) != len(self.parameters_to_fit):
-            raise ValueError("Bounds must have the same length as parameters_to_fit.")
+            raise ValueError(
+                "Bounds must be a tuple of two lists (lower_bounds, upper_bounds)."
+            )
+        if len(self.bounds[0]) != len(self.parameters_to_fit) or len(
+            self.bounds[1]
+        ) != len(self.parameters_to_fit):
+            raise ValueError(
+                "Bounds must have the same length as parameters_to_fit."
+            )
 
     def run(self, verbose=False):
         """
@@ -1219,7 +1227,8 @@ class LSFitter(EmceeLCFitter):
             options={
                 "maxiter": 100,
                 "ftol": 1e-4,
-            })
+            },
+        )
         self.best_theta = np.asarray(result.x)
         self.event = self.best_theta
 
@@ -1237,85 +1246,85 @@ class LSFitter(EmceeLCFitter):
 
 class AnomalyFitter(EmceeLCFitter):
     """
-    Emcee fitter with automatic sigma estimation for microlensing anomaly fitting.
+        Emcee fitter with automatic sigma estimation for microlensing anomaly fitting.
 
-    Extends :class:`EmceeLCFitter` by adding a :attr:`default_parameters_to_fit`
-    and automatic :attr:`sigmas` computation when sigmas are not explicitly
-    provided.
+        Extends :class:`EmceeLCFitter` by adding a :attr:`default_parameters_to_fit`
+        and automatic :attr:`sigmas` computation when sigmas are not explicitly
+        provided.
 
-    Unlike :class:`EmceeLCFitter`, ``initial_guess`` is required and
-    ``parameters_to_fit`` defaults to :attr:`default_parameters_to_fit` rather
-    than ``initial_guess.keys()``.  Users providing a custom ``initial_guess``
-    must therefore include values for every parameter in
-    :attr:`default_parameters_to_fit`, or supply ``parameters_to_fit``
-    explicitly to restrict or reorder the fitted set.
+        Unlike :class:`EmceeLCFitter`, ``initial_guess`` is required and
+        ``parameters_to_fit`` defaults to :attr:`default_parameters_to_fit` rather
+        than ``initial_guess.keys()``.  Users providing a custom ``initial_guess``
+        must therefore include values for every parameter in
+        :attr:`default_parameters_to_fit`, or supply ``parameters_to_fit``
+        explicitly to restrict or reorder the fitted set.
 
-    Sigma estimation follows a three-tier priority:
+        Sigma estimation follows a three-tier priority:
 
-    1. **Explicit** — if ``sigmas`` is provided it is used unchanged.
+        1. **Explicit** — if ``sigmas`` is provided it is used unchanged.
 
-    2. **From** ``anomaly_lc_params`` — if ``sigmas`` is not provided but
-       ``anomaly_lc_params`` is, then for ``t_0`` and ``t_E``::
+        2. **From** ``anomaly_lc_params`` — if ``sigmas`` is not provided but
+           ``anomaly_lc_params`` is, then for ``t_0`` and ``t_E``::
 
-           sigma_t0 = sigma_tE = min(0.01 * anomaly_lc_params['dt'], default_sigma[param])
+               sigma_t0 = sigma_tE = min(0.01 * anomaly_lc_params['dt'], default_sigma[param])
 
-       All other parameters fall through to tier 3.
+           All other parameters fall through to tier 3.
 
-    3. **Defaults from** ``initial_guess``::
+        3. **Defaults from** ``initial_guess``::
 
-           t_0   :  0.00001
-           u_0   :  0.001 * |u_0|
-           t_E   :  0.001 * |t_E|
-           alpha :  0.0001
-           log_X :  0.0001    # equivalent to sigma_X ~ 0.02% of X
+               t_0   :  0.00001
+               u_0   :  0.001 * |u_0|
+               t_E   :  0.001 * |t_E|
+               alpha :  0.0001
+               log_X :  0.0001    # equivalent to sigma_X ~ 0.02% of X
 
-       Parameters not matching any recognised pattern are omitted from
-       ``sigmas``; the corresponding walkers are not perturbed in that
-       dimension by :meth:`EmceeLCFitter.make_starting_vector`.
+           Parameters not matching any recognised pattern are omitted from
+           ``sigmas``; the corresponding walkers are not perturbed in that
+           dimension by :meth:`EmceeLCFitter.make_starting_vector`.
 
-    Class Attributes
-    ----------------
-    default_parameters_to_fit : list
-        ``['t_0', 'u_0', 't_E', 'log_rho', 'log_s', 'log_q', 'alpha']``
+        Class Attributes
+        ----------------
+        default_parameters_to_fit : list
+            ``['t_0', 'u_0', 't_E', 'log_rho', 'log_s', 'log_q', 'alpha']``
 
-    Parameters
-    ----------
-    initial_guess : dict
-        Starting parameter values keyed by parameter name.  Required.  Must
-        contain a value for every parameter in :attr:`default_parameters_to_fit`
-        (or every parameter in ``parameters_to_fit`` if that is supplied
-        explicitly).  Keys may carry a ``log_`` prefix for parameters sampled
-        in log10 space.
-    anomaly_lc_params : dict, optional
-        Parameters describing the anomaly light curve, as returned by
-        ``AnomalyPropertyEstimator.get_anomaly_lc_parameters()``.  Used only
-        to derive sigmas for ``t_0`` and ``t_E`` via the ``'dt'`` key.  Has
-        no effect on ``initial_guess`` and no effect when ``sigmas`` is already
-        provided explicitly.
-    emcee_settings : dict, optional
-        Passed through to :class:`EmceeLCFitter`.
+        Parameters
+        ----------
+        initial_guess : dict
+            Starting parameter values keyed by parameter name.  Required.  Must
+            contain a value for every parameter in :attr:`default_parameters_to_fit`
+            (or every parameter in ``parameters_to_fit`` if that is supplied
+            explicitly).  Keys may carry a ``log_`` prefix for parameters sampled
+            in log10 space.
+        anomaly_lc_params : dict, optional
+            Parameters describing the anomaly light curve, as returned by
+            ``AnomalyPropertyEstimator.get_anomaly_lc_parameters()``.  Used only
+            to derive sigmas for ``t_0`` and ``t_E`` via the ``'dt'`` key.  Has
+            no effect on ``initial_guess`` and no effect when ``sigmas`` is already
+            provided explicitly.
+        emcee_settings : dict, optional
+            Passed through to :class:`EmceeLCFitter`.
 
-    Notes
-    -----
-    :attr:`sigmas` are never derived from ``anomaly_lc_params`` directly.
-    The typical source for PSPL parameter sigmas is the result of a prior PSPL
-    fit (e.g. ``pspl_results.sigmas``), passed as explicit ``sigmas``.
+        Notes
+        -----
+        :attr:`sigmas` are never derived from ``anomaly_lc_params`` directly.
+        The typical source for PSPL parameter sigmas is the result of a prior PSPL
+        fit (e.g. ``pspl_results.sigmas``), passed as explicit ``sigmas``.
 
-    Subclasses that build ``initial_guess`` lazily (e.g.
-    :class:`AnomalyFitterEnsembleInitialization`) should pass
-    ``initial_guess=None`` to suppress automatic sigma computation, handling
-    it themselves once ``initial_guess`` is available.
-p_tru = [230, -0.4, 2.0, 0.1]
+        Subclasses that build ``initial_guess`` lazily (e.g.
+        :class:`AnomalyFitterEnsembleInitialization`) should pass
+        ``initial_guess=None`` to suppress automatic sigma computation, handling
+        it themselves once ``initial_guess`` is available.
+    p_tru = [230, -0.4, 2.0, 0.1]
 
-    All other parameters (``datasets``, ``sigmas``, ``model_config``,
-    ``event_config``, ``pool``, …) are inherited from :class:`EmceeLCFitter`
-    and :class:`MulensFitter`.
+        All other parameters (``datasets``, ``sigmas``, ``model_config``,
+        ``event_config``, ``pool``, …) are inherited from :class:`EmceeLCFitter`
+        and :class:`MulensFitter`.
 
-    See Also
-    --------
-    EmceeLCFitter : Parent class providing the full emcee mechanism.
-    AnomalyFitterEnsembleInitialization : Subclass using
-        ``WideAxisEnsembleInitializer`` for the starting ensemble.
+        See Also
+        --------
+        EmceeLCFitter : Parent class providing the full emcee mechanism.
+        AnomalyFitterEnsembleInitialization : Subclass using
+            ``WideAxisEnsembleInitializer`` for the starting ensemble.
     """
 
     default_parameters_to_fit = [
@@ -1795,7 +1804,6 @@ class BellTemplateFitter:
         ):
             if not (low <= param <= high):
                 raise ValueError(
-
                     f"Initial guess for anomaly classifier parameter {self._fit_parameters[i]} ({param}) is out of bounds ({low}, {high})."
                 )
 

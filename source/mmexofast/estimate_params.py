@@ -1,8 +1,3 @@
-#!/usr/bin/env python
-# coding: utf-8
-
-# In[ ]:
-
 """
 Classes and functions for estimating initial parameters for microlensing models.
 
@@ -31,6 +26,7 @@ from scipy.signal import find_peaks
 
 from .gridsearches import BinaryGridSearch
 from .mulens_object_config import EventConfig, ModelConfig
+from .utilities import KHParameterization
 
 
 def get_PSPL_params(
@@ -152,7 +148,7 @@ class BinaryLensParams:
         self.vbbl_accuracy = vbbl_accuracy
         self.mag_methods = None
         self.params = None
-    
+
     def _remove_kh(self, ulens):
         """
         Remove the 'k' and 'h' keys from the lens parameter dictionary.
@@ -175,8 +171,9 @@ class BinaryLensParams:
                 kh_param = KHParameterization()
                 s, q = kh_param.from_kh_to_sq(k, h)
                 ulens["s"] = s
-                ulens["q"] = q 
+                ulens["q"] = q
         return ulens
+
     @property
     def mag_methods_parameters(self):
         """
@@ -811,7 +808,7 @@ class WideAxisGridSearchEstimator(WideAxisParameterEstimator):
         s_grid=None,
         refine=True,
         nelder_mead_options=None,
-        grid_n_jobs=1
+        grid_n_jobs=1,
     ):
         super().__init__(params)
         self.datasets = datasets
@@ -2356,7 +2353,8 @@ class WideLowerGridSearchEstimator(
 
     pass
 
-class HighMagGridSearchEstimator(BinaryGridSearch, ParameterEstimator): 
+
+class HighMagGridSearchEstimator(BinaryGridSearch, ParameterEstimator):
     """
     Grid-only estimator for high-magnification anomalies.
 
@@ -2418,7 +2416,7 @@ class HighMagGridSearchEstimator(BinaryGridSearch, ParameterEstimator):
             verbose=verbose,
             fit_method=fit_method,
             n_jobs=grid_n_jobs,
-            parameterization='kh',
+            parameterization="kh",
             max_refinement_minima=6,
             bounds={
                 "k": (-4, 2.5),
@@ -2426,7 +2424,7 @@ class HighMagGridSearchEstimator(BinaryGridSearch, ParameterEstimator):
                 "s": (0.0, 10.0),
                 "q": (0.0, 1.0),
                 "alpha": (-10, 370),
-            }
+            },
         )
         self._binary_params = None
         self._alternate_params = None
@@ -2444,30 +2442,35 @@ class HighMagGridSearchEstimator(BinaryGridSearch, ParameterEstimator):
         """
         if self._alternate_params is not None:
             return self._alternate_params
-        
+
         binary_params = self.binary_params
-        alternate_s = 1. / binary_params.ulens["s"]
+        alternate_s = 1.0 / binary_params.ulens["s"]
         local_minima = self.find_local_minima()
-        chi2 =[]
-        s = [] 
+        chi2 = []
+        s = []
         for minima in local_minima:
             chi2.append(minima[0])
             s.append(minima[1]["s"])
-        
-        delta = np.sqrt((np.array(s) - alternate_s) ** 2 + (np.array(chi2) - min(chi2) ** 2))
+
+        delta = np.sqrt(
+            (np.array(s) - alternate_s) ** 2
+            + (np.array(chi2) - min(chi2) ** 2)
+        )
         alt_params = local_minima[np.argmin(delta)][1]
         alt_params = BinaryLensParams(
-                    alt_params, vbbl_accuracy=binary_params.vbbl_accuracy
-                )
+            alt_params, vbbl_accuracy=binary_params.vbbl_accuracy
+        )
         alt_params.mag_methods = binary_params.mag_methods
         self._alternate_params = alt_params
         return self._alternate_params
 
     def run(self):
-        super().run(progress=True, refine = True)
+        super().run(progress=True, refine=True)
         print(f"Finding local minima: {self.find_local_minima()}")
         chi2, fitted_params, level = self.find_local_minima()[0]
-        print(f"Best-fit high mag binary lens parameters from level {level}: {chi2} : {fitted_params}")
+        print(
+            f"Best-fit high mag binary lens parameters from level {level}: {chi2} : {fitted_params}"
+        )
         self._binary_params = BinaryLensParams(fitted_params)
         self._binary_params.set_mag_method(self.params)
 

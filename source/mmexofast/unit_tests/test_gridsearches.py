@@ -184,8 +184,8 @@ class TestBinaryGridSearch(unittest.TestCase):
         model_params = search._set_model_params_from_grid(
             {"k": -1.0, "h": 1.0, "alpha": 0.0}
         )
-        expected_s, expected_q = gridsearches.KHParameterization().from_kh_to_sq(
-            -1.0, 1.0
+        expected_s, expected_q = (
+            gridsearches.KHParameterization().from_kh_to_sq(-1.0, 1.0)
         )
         self.assertAlmostEqual(model_params["s"], expected_s)
         self.assertAlmostEqual(model_params["q"], expected_q)
@@ -273,9 +273,7 @@ class TestBinaryGridSearch(unittest.TestCase):
 
         search._run_refinement(5, 1, 1, "standard", False, 1)
 
-        search._refine_minimum.assert_called_once_with(
-            best, 5, 1, False, 1
-        )
+        search._refine_minimum.assert_called_once_with(best, 5, 1, False, 1)
         self.assertEqual(search.minima, [worse])
 
     def test_refinement_bounds_clip_refined_grid(self):
@@ -418,20 +416,22 @@ class TestBinaryGridSearch(unittest.TestCase):
             },
         )
 
-        result = search._fit_grid_point(
-            {"s": 1.0, "q": 0.1, "alpha": 0.0}
-        )
+        result = search._fit_grid_point({"s": 1.0, "q": 0.1, "alpha": 0.0})
 
         self.assertEqual(result["chi2"], 12.5)
         model_config.build.assert_called_once()
-        event_config.build.assert_called_once_with(
-            model=model, datasets=[]
-        )
+        event_config.build.assert_called_once_with(model=model, datasets=[])
         event.get_chi2.assert_called_once_with()
 
     def test_grid_cell_lsfitter_sets_initial_guess_and_uses_result(self):
         fitter = Mock()
-        fitter.best = {"t_0": 1.1, "s": 1.0, "q": 0.1, "alpha": 0.0, "chi2": 3.5}
+        fitter.best = {
+            "t_0": 1.1,
+            "s": 1.0,
+            "q": 0.1,
+            "alpha": 0.0,
+            "chi2": 3.5,
+        }
         fitter.run.return_value.success = True
 
         with patch("mmexofast.fitters.LSFitter", return_value=fitter) as lsf:
@@ -450,9 +450,7 @@ class TestBinaryGridSearch(unittest.TestCase):
                 fitter_kwargs={"parameters_to_fit": ["s", "q", "alpha"]},
                 fit_method="LSFitter",
             )
-            result = search._fit_grid_point(
-                {"s": 1.0, "q": 0.1, "alpha": 0.0}
-            )
+            result = search._fit_grid_point({"s": 1.0, "q": 0.1, "alpha": 0.0})
 
         self.assertEqual(result["chi2"], 3.5)
         lsf.assert_called_once()
@@ -482,9 +480,7 @@ class TestBinaryGridSearch(unittest.TestCase):
                 fitter_kwargs={"mag_methods": "point_source_point_lens"},
                 fit_method="sfit",
             )
-            result = search._fit_grid_point(
-                {"s": 1.0, "q": 0.1, "alpha": 0.0}
-            )
+            result = search._fit_grid_point({"s": 1.0, "q": 0.1, "alpha": 0.0})
 
         self.assertEqual(result["chi2"], 3.5)
         sfit.assert_called_once()

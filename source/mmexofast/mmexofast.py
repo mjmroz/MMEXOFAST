@@ -2508,7 +2508,6 @@ class MMEXOFASTFitter:
                     "dip",
                     "bump",
                     "caustic_crossing",
-
                 ]:
                     if (
                         self.intermediate_results.anomaly_lc_params["u_0"]
@@ -2521,11 +2520,15 @@ class MMEXOFASTFitter:
 
                     logger.info("Alternate solution: %s", s_alt.ulens)
                     est_params[class_name + "_alt"] = s_alt
-                if  self.intermediate_results.anomaly_type == "high_mag":
-                    
-                    if self._output_config is not None and self._output_config.save_plots:
+                if self.intermediate_results.anomaly_type == "high_mag":
+                    if (
+                        self._output_config is not None
+                        and self._output_config.save_plots
+                    ):
                         fig = estimator.plot()
-                        fig.savefig(self._output_config.plot_path("HighMag_grid"))
+                        fig.savefig(
+                            self._output_config.plot_path("HighMag_grid")
+                        )
                         plt.close(fig)
                         logger.info(
                             "Saved high-mag grid plot to %s.",
@@ -2534,7 +2537,6 @@ class MMEXOFASTFitter:
                         s_alt = estimator.alternate_params
                         logger.info("Alternate solution: %s", s_alt.ulens)
                         est_params[class_name + "_alt"] = s_alt
-
 
                 self.mag_methods = params.mag_methods
                 self.mag_methods_parameters = params.mag_methods_parameters
