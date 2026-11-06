@@ -1,8 +1,3 @@
-#!/usr/bin/env python
-# coding: utf-8
-
-# In[ ]:
-
 """
 Classes and functions for estimating initial parameters for microlensing models.
 
