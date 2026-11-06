@@ -1,5 +1,7 @@
 import os.path
 import unittest
+from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
 
 import MulensModel as mm
 import numpy as np
@@ -63,6 +65,99 @@ class TestSFitFitter_2(TestSFitFitter_1):
         self.data = mm.MulensData(file_name=datafile, phot_fmt="mag")
         self.true_params, self.input_fluxes = self._parse_header(datafile)
         self.initial_guess = {"t_0": 4.0, "u_0": 0.7, "t_E": 20.0}
+
+
+class TestLSFitter(unittest.TestCase):
+    @pytest.mark.slow
+    def test_run_on_real_anomaly_event(self):
+        datafile = os.path.join(DATA_PATH, "unit_test_data", "planet4AF.dat")
+        data = mm.MulensData(file_name=datafile, phot_fmt="mag")
+        initial_guess = {
+            "t_0": 5.2,
+            "u_0": 0.28,
+            "t_E": 15.5,
+            "s": 1.5,
+            "q": 1e-5,
+            "alpha": 159.0,
+            "rho": 0.01,
+        }
+        fitter = fitters.LSFitter(
+            datasets=[data],
+            initial_guess=initial_guess,
+            parameters_to_fit=["t_0", "u_0", "t_E"],
+            bounds={
+                "t_0": (4.0, 6.0),
+                "u_0": (0.05, 0.8),
+                "t_E": (5.0, 30.0),
+            },
+            mag_methods=[13.0, "VBBL", 22.0],
+            mag_methods_parameters={"VBBL": {"accuracy": 0.01}},
+        )
+
+        result = fitter.run()
+
+        self.assertEqual(result.x.shape, (3,))
+        self.assertTrue(np.all(np.isfinite(result.x)))
+        self.assertTrue(np.isfinite(fitter.best["chi2"]))
+        self.assertGreaterEqual(fitter.best["t_0"], 4.0)
+        self.assertLessEqual(fitter.best["t_0"], 6.0)
+        self.assertGreaterEqual(fitter.best["u_0"], 0.05)
+        self.assertLessEqual(fitter.best["u_0"], 0.8)
+        self.assertGreaterEqual(fitter.best["t_E"], 5.0)
+        self.assertLessEqual(fitter.best["t_E"], 30.0)
+
+    def test_parse_bounds_dict_fills_unspecified_parameters(self):
+        fitter = fitters.LSFitter(
+            initial_model_params={"t_0": 1.0, "u_0": 0.1, "t_E": 10.0},
+            parameters_to_fit=["t_0", "u_0", "t_E"],
+            bounds={"u_0": (0.0, 1.0)},
+        )
+
+        self.assertEqual(
+            fitter.bounds,
+            ([-np.inf, 0.0, -np.inf], [np.inf, 1.0, np.inf]),
+        )
+
+    def test_run_minimizes_negative_log_probability_and_stores_result(self):
+        parameters = SimpleNamespace(
+            t_0=1.0,
+            u_0=0.1,
+            parameters={"t_0": 1.0, "u_0": 0.1},
+        )
+        event = MagicMock()
+        event.model.parameters = parameters
+        event.get_chi2.return_value = 12.5
+        result = SimpleNamespace(x=np.array([1.2, 0.2]), success=True)
+
+        fitter = fitters.LSFitter(
+            initial_model_params={"t_0": 1.0, "u_0": 0.1},
+            parameters_to_fit=["t_0", "u_0"],
+            bounds=([-np.inf, -np.inf], [np.inf, np.inf]),
+        )
+        fitter._event = event
+
+        with (
+            patch.object(fitter, "ln_prob", return_value=-7.0) as ln_prob,
+            patch("mmexofast.fitters.minimize", return_value=result) as minimize,
+        ):
+            returned = fitter.run()
+            objective = minimize.call_args.args[0]
+            self.assertEqual(objective(result.x), 7.0)
+            ln_prob.assert_called_once_with(result.x)
+
+        minimize.assert_called_once()
+        np.testing.assert_array_equal(fitter.best_theta, result.x)
+        self.assertIs(returned, result)
+        self.assertEqual(fitter.results["chi2"], 12.5)
+        self.assertEqual(fitter.best["chi2"], 12.5)
+
+    def test_invalid_bounds_shape_is_rejected(self):
+        with self.assertRaises(ValueError):
+            fitters.LSFitter(
+                initial_model_params={"t_0": 1.0},
+                parameters_to_fit=["t_0"],
+                bounds=([-np.inf],),
+            )
 
 
 class TestAnomalyFitter(unittest.TestCase):

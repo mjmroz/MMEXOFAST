@@ -7,11 +7,12 @@ import pandas as pd
 from astropy.coordinates import SkyCoord
 
 from mmexofast.config import SAMPLE_DATA_PATH
+import yaml
 
 # The 2018 Data Challenge light curves are not shipped with the package;
 # this example needs a source checkout. See mmexofast.config.
 dir_ = os.path.join(SAMPLE_DATA_PATH, "2018DataChallenge")
-
+dir26Beginner = os.path.join(SAMPLE_DATA_PATH, "2026DataChallenge", "Beginner")
 event_info = np.genfromtxt(
     os.path.join(dir_, "event_info.txt"),
     dtype=None,
@@ -36,7 +37,41 @@ class TestDataSet:
         )
         self.coords = coords.to_string(style="hmsdms")
 
-
+class TestDataSet26:
+    def __init__(self, lc_num):
+        self.file_F146 = os.path.join(
+            dir26Beginner, "RMDC26_{0:06d}/n20160201.F146.WFIRST26.RMDC26_{0:06d}.dat".format(
+                lc_num)
+        )
+        self.file_F087 = os.path.join(
+            dir26Beginner, "RMDC26_{0:06d}/n20160201.F087.WFIRST26.RMDC26_{0:06d}.dat".format(
+                lc_num)
+        )
+        self.file_F213 = os.path.join(
+            dir26Beginner, "RMDC26_{0:06d}/n20160201.F213.WFIRST26.RMDC26_{0:06d}.dat".format(
+                lc_num)
+        )
+        self.file_F146_loc = os.path.join(
+            dir26Beginner, "RMDC26_{0:06d}/n20160201.F146.WFIRST26.RMDC26_{0:06d}.loc".format(lc_num)
+        )
+        self.file_F087_loc = os.path.join(
+            dir26Beginner, "RMDC26_{0:06d}/n20160201.F087.WFIRST26.RMDC26_{0:06d}.loc".format(lc_num)
+        )
+        self.file_F213_loc = os.path.join(
+            dir26Beginner, "RMDC26_{0:06d}/n20160201.F213.WFIRST26.RMDC26_{0:06d}.loc".format(lc_num)
+        )
+        with open(os.path.join(dir26Beginner, "RMDC26_{0:06d}/RMDC26_{0:06d}.yaml".format(lc_num)), 'r') as f:
+            info = yaml.safe_load(f)
+        self.info = info
+     
+        self.info = info
+        index = np.where(event_info["num"] == lc_num)
+        coords = SkyCoord(
+            self.info["ra_deg"]  , self.info["dec_deg"], unit="deg"
+        )
+        self.coords = coords.to_string(style="hmsdms")
+        
+        
 class DC18Answers:
     print_columns = [
         "idx",

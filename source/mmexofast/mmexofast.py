@@ -29,6 +29,7 @@ from .estimate_params import (
     CloseAxisGridSearchEstimator,
     CloseLowerGridSearchEstimator,
     CloseUpperGridSearchEstimator,
+    HighMagGridSearchEstimator,
     ParameterEstimator,
     WideAxisGridSearchEstimator,
     WideLowerGridSearchEstimator,
@@ -52,7 +53,11 @@ from .gridsearches import (
     ParallaxGridSearch,
 )
 from .mulens_object_config import EventConfig, ModelConfig
-from .observatories import get_kwargs, get_telescope_band_from_filename
+from .observatories import (
+    get_kwargs,
+    get_telescope_band_from_filename,
+    set_filename_from_MulensData,
+)
 from .results import (
     AllFitResults,
     FitRecord,
@@ -270,6 +275,7 @@ class OutputConfig:
     save_plots: bool = True
     save_grid_results: bool = False
     save_table: bool = False
+    save_datasets: bool = True
     table_formats: list = field(default_factory=lambda: ["latex"])
     save_exozippy_init: bool = False
 
@@ -406,6 +412,11 @@ class MMEXOFASTFitter:
         if e.g.``u_0<0.001`` then FSPL is only run if the fitted u_0 from PSPL model is less than 0.001.
     source_type : str
         ``'dwarf'`` or ``'giant'``. Default is ``'giant'``.  Used to set a initial value of rho for FSPL fitting.
+    grid_n_jobs : int
+        Number of worker processes for grid searches. ``1`` (default) runs
+        serially; ``-1`` uses all available CPUs. Rectangular grid searches
+        require nearest-neighbor initialization to be disabled when using
+        more than one worker.
     mag_methods : list, optional
         Magnification methods in MulensModel convention.
     vbbl_accuracy : float, optional
@@ -537,6 +548,8 @@ class MMEXOFASTFitter:
         "renormalize_errors",
         "no_parallax",
         "parallax_grid",
+        "grid_n_jobs",
+        "parallel_refinement",
         "primary_location",
         "primary_dataset",
         "emcee_settings",
@@ -582,6 +595,8 @@ class MMEXOFASTFitter:
         renormalize_errors: bool = True,  # TODO: ADD option for remove_outliers=True/False
         no_parallax: bool = False,
         parallax_grid: bool = False,
+        grid_n_jobs: int = 1,
+        parallel_refinement: bool = False,
         primary_location=None,
         primary_dataset=None,
         emcee_settings=None,
@@ -1457,7 +1472,9 @@ class MMEXOFASTFitter:
         Stores the best grid point in
         ``self.intermediate_results.best_ef_grid_point``.
         """
-        ef_grid = EventFinderGridSearch(datasets=self.datasets)
+        ef_grid = EventFinderGridSearch(
+            datasets=self.datasets, n_jobs=self.grid_n_jobs
+        )
         ef_grid.run()
 
         if self._output_config is not None and self._output_config.save_plots:
@@ -1762,6 +1779,36 @@ class MMEXOFASTFitter:
             self.fix_source_flux
         )
         self.event_config = self._build_event_config()
+
+        if self._output_config:
+            self._save_datasets(
+                suffix="MMEXOFAST_renorm", datasets=self.datasets
+            )
+
+    def _save_datasets(self, suffix="", datasets=None) -> None:
+        """
+        Save the datasets to the output directory.
+        """
+        if self._output_config.save_datasets and datasets is not None:
+            path = self._output_config.output_dir
+            path.mkdir(parents=True, exist_ok=True)
+            for dataset in datasets:
+                set_filename_from_MulensData(dataset, suffix=suffix)
+                dataset_path = os.path.join(
+                    path, dataset.plot_properties["label"]
+                )
+                if dataset.input_fmt == "mag":
+                    phot = dataset.mag
+                    err = dataset.err_mag
+                else:
+                    phot = dataset.flux
+                    err = dataset.err_flux
+                np.savetxt(
+                    dataset_path,
+                    np.column_stack((dataset.time, phot, err)),
+                    fmt="%.10f %.10f %.10f",
+                    delimiter=" ",
+                )
 
     def _build_renorm_event(self):
         """
@@ -2303,7 +2350,9 @@ class MMEXOFASTFitter:
         Stores the best grid point in
         ``self.intermediate_results.best_af_grid_point``.
         """
-        af_grid = AnomalyFinderGridSearch(residuals=self.residuals)
+        af_grid = AnomalyFinderGridSearch(
+            residuals=self.residuals, n_jobs=self.grid_n_jobs
+        )
         af_grid.run()
         if self._output_config is not None and self._output_config.save_plots:
             fig = af_grid.plot()
@@ -2420,6 +2469,8 @@ class MMEXOFASTFitter:
             ]
         elif self.intermediate_results.anomaly_type == "dip":
             estimator_classes = [CloseAxisGridSearchEstimator]
+        elif self.intermediate_results.anomaly_type == "high_mag":
+            estimator_classes = [HighMagGridSearchEstimator]
         else:
             logger.info(
                 "Binary params estimate not implemented for %s",
@@ -2433,6 +2484,7 @@ class MMEXOFASTFitter:
                     params=self.intermediate_results.anomaly_lc_params,
                     model_config=self.model_config,
                     event_config=self.event_config,
+                    grid_n_jobs=self.grid_n_jobs,
                 )
                 # Overrides the class-level default on ParameterEstimator so
                 # every BinaryLensParams it builds carries this tolerance.
@@ -2456,6 +2508,7 @@ class MMEXOFASTFitter:
                     "dip",
                     "bump",
                     "caustic_crossing",
+
                 ]:
                     if (
                         self.intermediate_results.anomaly_lc_params["u_0"]
@@ -2468,6 +2521,20 @@ class MMEXOFASTFitter:
 
                     logger.info("Alternate solution: %s", s_alt.ulens)
                     est_params[class_name + "_alt"] = s_alt
+                if  self.intermediate_results.anomaly_type == "high_mag":
+                    
+                    if self._output_config is not None and self._output_config.save_plots:
+                        fig = estimator.plot()
+                        fig.savefig(self._output_config.plot_path("HighMag_grid"))
+                        plt.close(fig)
+                        logger.info(
+                            "Saved high-mag grid plot to %s.",
+                            self._output_config.plot_path("HighMag_grid"),
+                        )
+                        s_alt = estimator.alternate_params
+                        logger.info("Alternate solution: %s", s_alt.ulens)
+                        est_params[class_name + "_alt"] = s_alt
+
 
                 self.mag_methods = params.mag_methods
                 self.mag_methods_parameters = params.mag_methods_parameters
@@ -2504,7 +2571,6 @@ class MMEXOFASTFitter:
         n_data = sum(np.sum(dataset.good) for dataset in self.datasets)
         logger.info(f"PL chi2: {pspl_chi2:.1f}, N_good: {n_data}")
 
-        # TODO: Implement grid search for high-mag models. See gridsearches.BinaryGridSearch()
         # TODO: Separate models (key/param items) into separate steps.
         # TODO: Check for and implement point source binary lens models.
 
@@ -2637,6 +2703,8 @@ class MMEXOFASTFitter:
                 fitter_kwargs=self._get_fitter_kwargs(source_type=source_type),
                 skip_optimization=False,
                 verbose=False,
+                n_jobs=self.grid_n_jobs,
+                parallel_refinement=self.parallel_refinement,
             )
             grid.run(refine=True)
             grids[par_branch] = grid
@@ -3283,6 +3351,7 @@ class MMEXOFASTFitter:
             If any dataset has neither ``file_name`` nor a label.
         """
         for i, dataset in enumerate(self.datasets):
+            set_filename_from_MulensData(dataset)
             label = dataset.plot_properties.get("label")
             if not label:
                 if getattr(dataset, "file_name", None):

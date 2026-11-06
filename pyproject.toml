@@ -28,6 +28,7 @@ dependencies = [
   "pyyaml",
   "MulensModel>=3",
   "sfit_minimizer>=1.0.3",
+  "tqdm",
 ]
 
 [project.optional-dependencies]

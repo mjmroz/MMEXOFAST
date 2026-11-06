@@ -29,6 +29,7 @@ from matplotlib.gridspec import GridSpec
 from scipy.optimize import minimize
 from scipy.signal import find_peaks
 
+from .gridsearches import BinaryGridSearch
 from .mulens_object_config import EventConfig, ModelConfig
 
 
@@ -147,11 +148,35 @@ class BinaryLensParams:
     _DEFAULT_VBBL_ACCURACY = 0.01
 
     def __init__(self, ulens, vbbl_accuracy=_DEFAULT_VBBL_ACCURACY):
-        self.ulens = ulens
+        self.ulens = self._remove_kh(ulens)
         self.vbbl_accuracy = vbbl_accuracy
         self.mag_methods = None
         self.params = None
+    
+    def _remove_kh(self, ulens):
+        """
+        Remove the 'k' and 'h' keys from the lens parameter dictionary.
 
+        Parameters
+        ----------
+        ulens : dict
+            Binary lens parameter dictionary.
+
+        Returns
+        -------
+        dict
+            The lens parameter dictionary with the 'k' and 'h' keys removed.
+        """
+        ulens = ulens.copy()
+        k = ulens.pop("k", None)
+        h = ulens.pop("h", None)
+        if "s" not in ulens or "q" not in ulens:
+            if k is not None and h is not None:
+                kh_param = KHParameterization()
+                s, q = kh_param.from_kh_to_sq(k, h)
+                ulens["s"] = s
+                ulens["q"] = q 
+        return ulens
     @property
     def mag_methods_parameters(self):
         """
@@ -554,6 +579,7 @@ class WideAxisParameterEstimator(ParameterEstimator):
         self._delta_A = None
         self._a_pspl = None
         self._q_limit = 1e-5
+        self._grid_n_jobs = None  # Number of parallel jobs for grid search; set externally if desired
 
     def get_rho(self):
         """
@@ -785,6 +811,7 @@ class WideAxisGridSearchEstimator(WideAxisParameterEstimator):
         s_grid=None,
         refine=True,
         nelder_mead_options=None,
+        grid_n_jobs=1
     ):
         super().__init__(params)
         self.datasets = datasets
@@ -806,6 +833,7 @@ class WideAxisGridSearchEstimator(WideAxisParameterEstimator):
         self._s_grid = s_grid
         self.refine = refine
         self.nelder_mead_options = nelder_mead_options
+        self.grid_n_jobs = grid_n_jobs
         self._binary_params = None
         self._results = None
         self._refinement_results = None
@@ -2327,6 +2355,123 @@ class WideLowerGridSearchEstimator(
     """
 
     pass
+
+class HighMagGridSearchEstimator(BinaryGridSearch, ParameterEstimator): 
+    """
+    Grid-only estimator for high-magnification anomalies.
+
+    Unlike the other binary-lens estimators, this class does not derive
+    ``s``, ``q``, or ``alpha`` from the anomaly geometry. Those parameters
+    are searched directly by :class:`BinaryGridSearch`. With the default
+    ``fit_method="EmceeLCFitter"``, ``s``, ``q``, and ``alpha`` are sampled
+    at each grid point while the remaining parameters stay fixed. The grid
+    values are compared across grid points.
+    """
+
+    def __init__(
+        self,
+        datasets,
+        params,
+        model_config=None,
+        event_config=None,
+        grid_params=None,
+        fitter_kwargs=None,
+        rho=0.001,
+        verbose=False,
+        grid_n_jobs=None,
+        fit_method="chi2",
+    ):
+        self.params = params
+        self.model_config = model_config or ModelConfig()
+        self.event_config = event_config or EventConfig()
+
+        static_params = {
+            "t_0": params["t_0"],
+            "u_0": params["u_0"],
+            "t_E": params["t_E"],
+            "rho": params.get("rho", rho),
+        }
+        binary_seed = {
+            **static_params,
+            "s": 1.0,
+            "q": 0.01,
+            "alpha": 0.0,
+        }
+        binary_params = BinaryLensParams(binary_seed)
+        binary_params.set_mag_method(params)
+
+        search_fitter_kwargs = {
+            "model_config": self.model_config,
+            "event_config": self.event_config,
+            "mag_methods": binary_params.mag_methods,
+            "mag_methods_parameters": binary_params.mag_methods_parameters,
+            "parameters_to_fit": ["s", "q", "alpha"],
+        }
+        if fitter_kwargs is not None:
+            search_fitter_kwargs.update(fitter_kwargs)
+
+        super().__init__(
+            datasets=datasets,
+            static_params=static_params,
+            grid_params=grid_params,
+            fitter_kwargs=search_fitter_kwargs,
+            verbose=verbose,
+            fit_method=fit_method,
+            n_jobs=grid_n_jobs,
+            parameterization='kh',
+            max_refinement_minima=6,
+            bounds={
+                "k": (-4, 2.5),
+                "h": (-5, 5),
+                "s": (0.0, 10.0),
+                "q": (0.0, 1.0),
+                "alpha": (-10, 370),
+            }
+        )
+        self._binary_params = None
+        self._alternate_params = None
+
+    @property
+    def binary_params(self):
+        if self._binary_params is None:
+            raise RuntimeError("run() must be called before binary_params.")
+        return self._binary_params
+
+    @property
+    def alternate_params(self):
+        """
+        Return the alternate parameters for the binary lens, from minima closes to 1/s of the chi2 grid.
+        """
+        if self._alternate_params is not None:
+            return self._alternate_params
+        
+        binary_params = self.binary_params
+        alternate_s = 1. / binary_params.ulens["s"]
+        local_minima = self.find_local_minima()
+        chi2 =[]
+        s = [] 
+        for minima in local_minima:
+            chi2.append(minima[0])
+            s.append(minima[1]["s"])
+        
+        delta = np.sqrt((np.array(s) - alternate_s) ** 2 + (np.array(chi2) - min(chi2) ** 2))
+        alt_params = local_minima[np.argmin(delta)][1]
+        alt_params = BinaryLensParams(
+                    alt_params, vbbl_accuracy=binary_params.vbbl_accuracy
+                )
+        alt_params.mag_methods = binary_params.mag_methods
+        self._alternate_params = alt_params
+        return self._alternate_params
+
+    def run(self):
+        super().run(progress=True, refine = True)
+        print(f"Finding local minima: {self.find_local_minima()}")
+        chi2, fitted_params, level = self.find_local_minima()[0]
+        print(f"Best-fit high mag binary lens parameters from level {level}: {chi2} : {fitted_params}")
+        self._binary_params = BinaryLensParams(fitted_params)
+        self._binary_params.set_mag_method(self.params)
+
+        return self._binary_params
 
 
 def get_close_params(params, q=None, rho=None):
