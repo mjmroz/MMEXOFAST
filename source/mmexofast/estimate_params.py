@@ -573,6 +573,7 @@ class WideAxisParameterEstimator(ParameterEstimator):
         super().__init__(params, limit=limit)
         self._delta_A = None
         self._a_pspl = None
+        self._q_limit = 1e-5
         self._grid_n_jobs = None  # Number of parallel jobs for grid search; set externally if desired
 
     def get_rho(self):
@@ -670,15 +671,22 @@ class WideAxisParameterEstimator(ParameterEstimator):
         """
         Planet-to-star mass ratio.
 
-        Estimated from the anomaly as ``0.5 * |delta_A| * rho^2``.
+        Estimated from the anomaly duration and source trajectory geometry as
+        ``(s * dt / t_E / 4)^2 * (s^2 + 1) * sin(alpha)^2``. This is a
+        simplified approximation for the mass ratio of a planetary system.
 
-        Returns
-        -------
-        float
+        See Han et al. 2006 eq. 9.
+        https://ui.adsabs.harvard.edu/abs/2006ApJ...638.1080H/abstract
         """
         if self._q is None:
-            self._q = 0.5 * np.abs(self.delta_A) * (self.rho**2)
-
+            #     self._q = 0.5 * np.abs(self.delta_A) * (self.rho**2)
+            self._q = (
+                (self.s * self.params["dt"] / self.params["t_E"] / 4.0) ** 2
+                * ((self.s**2) + 1)
+                * np.sin(np.deg2rad(self.alpha)) ** 2
+            )
+            if self._q < self._q_limit:
+                self._q = self._q_limit
         return self._q
 
     @property
@@ -790,6 +798,8 @@ class WideAxisGridSearchEstimator(WideAxisParameterEstimator):
         n_alpha=None,
         d_s=None,
         n_s=None,
+        d_log_q=None,
+        n_log_q=None,
         log_q_values=None,
         log_rho_values=None,
         alpha_grid=None,
@@ -810,6 +820,8 @@ class WideAxisGridSearchEstimator(WideAxisParameterEstimator):
         self.n_alpha = n_alpha
         self.d_s = d_s
         self.n_s = n_s
+        self.d_log_q = d_log_q
+        self.n_log_q = n_log_q
         self.log_q_values = log_q_values
         self.log_rho_values = log_rho_values
         self._alpha_grid = alpha_grid
@@ -1034,28 +1046,31 @@ class WideAxisGridSearchEstimator(WideAxisParameterEstimator):
         """
         if self._s_grid is not None:
             return self._s_grid
-        d_s = self.d_s if self.d_s is not None else 0.01 * self.s
-        n_s = self.n_s if self.n_s is not None else 4
+        d_s = self.d_s if self.d_s is not None else 0
+        n_s = self.n_s if self.n_s is not None else 1
         s_offset = np.arange(n_s) - (n_s - 1) / 2
+        # print(f"\nn_s={n_s}, d_s={d_s}, s_offset={s_offset}")
+        # print(f"\ns={self.s}, s_values={self.s + s_offset * d_s}")
         return self.s + s_offset * d_s
 
     @property
     def log_q_grid(self):
         """
         Grid values of log10(q) for the grid search.
-
-        Returns ``log_q_values`` if provided at construction, otherwise
-        defaults to ``numpy.arange(-6, -1)``.
-
+        If ``log_q_values`` was provided at construction, returns that directly.
+        Otherwise, it does not construct a grid and returns a single value of ``log10(q)`` from the analytic estimate.
         Returns
         -------
         numpy.ndarray
         """
-        return (
-            self.log_q_values
-            if self.log_q_values is not None
-            else np.arange(-6, -1)
-        )
+        if self.log_q_values is not None:
+            return self.log_q_values
+        d_log_q = self.d_log_q if self.d_log_q is not None else 0.0
+        n_log_q = self.n_log_q if self.n_log_q is not None else 1
+        q_offset = np.arange(n_log_q) - (n_log_q - 1) / 2
+        # print(f"\nn_log_q={n_log_q}, d_log_q={d_log_q}, q_offset={q_offset}")
+        # print(f"\nq={self.q}, log_q_grid={np.log10(self.q) + q_offset * d_log_q}")
+        return np.log10(self.q) + q_offset * d_log_q
 
     @property
     def log_rho_grid(self):
@@ -1983,9 +1998,7 @@ class CloseUpperParameterEstimator(WideAxisParameterEstimator):
                 "Use 'dwarf', 'giant', or 'point'."
             )
         super().__init__(params, limit=limit)
-        if q is None:
-            q = 0.004
-        self._q = q
+
         if rho is not None:
             self._rho = rho
         self._eta_not, self._mu, self._phi = None, None, None
@@ -2053,26 +2066,6 @@ class CloseUpperParameterEstimator(WideAxisParameterEstimator):
         return new_params
 
     @property
-    def log_q_grid(self):
-        """
-        Grid values of log10(q) for the grid search.
-
-        Returns ``log_q_values`` if provided at construction, otherwise
-        defaults to ``numpy.array([-2.5, -2, -1, -0.5])``, which spans
-        the mass ratio range appropriate for close binary models.
-
-        Returns
-        -------
-        numpy.ndarray
-        """
-        # TODO: Does this go here or in CloseUpperGridSearchEstimator?
-        return (
-            self.log_q_values
-            if self.log_q_values is not None
-            else np.array([-2.5, -2, -1, -0.5])
-        )
-
-    @property
     def s(self):
         """
         Binary lens separation in Einstein radius units.
@@ -2106,7 +2099,13 @@ class CloseUpperParameterEstimator(WideAxisParameterEstimator):
 
     @property
     def q(self):
-        """Planet-to-star mass ratio, set at construction (default 0.004)."""
+        """
+        Planet-to-star mass ratio, set at construction (default 0.004).
+        """
+        if self._q is None:
+            self._q = (self.params["dt"] / self.t_E) ** 2.0
+            if self._q < self._q_limit:
+                self._q = self._q_limit
         return self._q
 
     @property
@@ -2528,7 +2527,8 @@ class CloseAxisParameterEstimator(WideAxisParameterEstimator):
         Computed as ``|0.5 * (sqrt(u_pl^2 + 4) - u_pl)|``.
         This is the close-topology solution (s < 1).
 
-        See Han 2006 https://ui.adsabs.harvard.edu/abs/2006ApJ...638.1080H/abstract
+        See Han 2006
+        https://ui.adsabs.harvard.edu/abs/2006ApJ...638.1080H/abstract
 
         Returns
         -------
@@ -2560,6 +2560,8 @@ class CloseAxisParameterEstimator(WideAxisParameterEstimator):
                 * (self.s / self.u_0)
                 * np.abs((np.sin(np.deg2rad(self.alpha))) ** 3)
             )
+            if self._q < self._q_limit:
+                self._q = self._q_limit
         return self._q
 
     @property

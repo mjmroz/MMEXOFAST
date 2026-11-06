@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-from examples.DC18_classes import DC18Answers
+from DC18_classes import DC18Answers
 
 
 class SelectionStrategy(Enum):
