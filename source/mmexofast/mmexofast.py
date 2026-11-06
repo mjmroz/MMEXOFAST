@@ -3124,33 +3124,57 @@ class MMEXOFASTFitter:
             return self._get_event_t_range(event, n_tE=n_tE)
 
     def _get_af_grid_point_t_range(self, n_teff=3):
-        """Time range around the anomaly found by the anomaly finder grid."""
+        """Time range around the refined anomaly estimate."""
         point = self.intermediate_results.best_af_grid_point
+        anomaly_params = self.intermediate_results.anomaly_lc_params
+        if anomaly_params is not None:
+            half_width = n_teff * point["t_eff"]
+            return [
+                anomaly_params["t_pl"] - half_width,
+                anomaly_params["t_pl"] + half_width,
+            ]
         return [
             point["t_0"] - n_teff * point["t_eff"],
             point["t_0"] + n_teff * point["t_eff"],
         ]
 
     def _plot_planet_window(self):
-        # TODO: Consider updating to use anomaly_lc_params? how different is best_af_grid_point from anomaly_lc_params?
-        if self.intermediate_results.best_af_grid_point is not None:
+        anomaly_params = self.intermediate_results.anomaly_lc_params
+        if anomaly_params is not None:
+            t_pl = anomaly_params["t_pl"]
+            dt = anomaly_params["dt"]
             plt.axvline(
-                self.intermediate_results.best_af_grid_point["t_0"]
+                t_pl
                 - 2450000.0,
                 color="black",
                 linestyle=":",
             )
             plt.axvline(
-                self.intermediate_results.best_af_grid_point["t_0"]
-                - self.intermediate_results.best_af_grid_point["t_eff"]
+                t_pl - 0.5 * dt
                 - 2450000.0,
                 color="black",
                 linestyle="--",
             )
             plt.axvline(
-                self.intermediate_results.best_af_grid_point["t_0"]
-                + self.intermediate_results.best_af_grid_point["t_eff"]
+                t_pl + 0.5 * dt
                 - 2450000.0,
+                color="black",
+                linestyle="--",
+            )
+        elif self.intermediate_results.best_af_grid_point is not None:
+            point = self.intermediate_results.best_af_grid_point
+            plt.axvline(
+                point["t_0"] - 2450000.0,
+                color="black",
+                linestyle=":",
+            )
+            plt.axvline(
+                point["t_0"] - point["t_eff"] - 2450000.0,
+                color="black",
+                linestyle="--",
+            )
+            plt.axvline(
+                point["t_0"] + point["t_eff"] - 2450000.0,
                 color="black",
                 linestyle="--",
             )
