@@ -2475,6 +2475,83 @@ class HighMagGridSearchEstimator(BinaryGridSearch, ParameterEstimator):
         return self._binary_params
 
 
+class  HamagriEstimator(ParameterEstimator):
+    """
+    Estaimating binary lens paramters using hamagri code.
+    See :https://github.com/NunotaKansuke/hamagri for more details
+    """
+    def __init__(
+        self,
+        datasets,
+        params,
+        atlas = None   
+        model_config=None,
+        event_config=None,
+        fitter_kwargs=None,
+        verbose=False,
+    ):
+    self.datasets = datasets
+    self.params = params
+    self.model_config = model_config or ModelConfig()
+    self.event_config = event_config or EventConfig()
+    self._get_atlas(atlas)
+    
+    def _get_atlas(self, atlas):
+        """
+        Get the atlas for hamagri.
+
+        Parameters
+        ----------
+        atlas : str or None
+            Path to the atlas file. If None, use the default atlas.
+        """
+        if atlas is None:
+            path = os.environ["HAMAGRI_ATLAS"]
+            if not os.path.exists(path):
+                raise FileNotFoundError("Default atlas not found.")
+            self.atlas = Atlas.open(path)
+        else:
+            self.atlas = atlas 
+
+    def run(self):
+        """
+        Run the hamagri estimator.
+        """
+        parsed_datasets = self._parse_datastes()
+        geometry = hamagri.Geometry(t0=self.params["t_0"], u0=self.params["u_0"], tE=self.params["t_E"],
+                                    coordinate_frame=self.atlas.coordinate_frame,
+        )
+        self.best_candidates = self.atlas.search(parsed_datasets, [geometry]).candidate
+        params  = self.params.copy()
+        params['s'] =self.best_candidates[0].s
+        params['q'] =self.best_candidates[0].q
+        params['alpha'] =self.best_candidates[0].alpha
+        self._binary_params = BinaryLensParams(params)
+        self._binary_params.set_mag_method(self.params)
+        return self._binary_params       
+    def _parse_datastes(self):
+        """
+        Parse datasets into the format expected by hamagri.
+
+        Parameters
+        ----------
+        datasets : list of MulensModel.Dataset
+            The datasets to parse.
+
+        Returns
+        -------
+        list of dict
+            Each dict contains 'time', 'flux', and 'flux_err' keys.
+        """
+        parsed_datasets = []
+        for dataset in datasets:
+            parsed_datasets.append({
+                'time': dataset.time,
+                'flux': dataset.flux,
+                'flux_err': dataset.flux_err
+            })
+        return parsed_datasets
+
 def get_close_params(params, q=None, rho=None):
     """
     Transform initial parameters into two close model parameters for a binary lens.
